@@ -13,29 +13,38 @@ class SignupScreen extends StatefulWidget {
 
 class _SignupScreenState extends State<SignupScreen> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _loading = false;
 
   Future<void> signup() async {
-    final name = _nameController.text.trim();
+    final fullname = _nameController.text.trim();
+    final username = _usernameController.text.trim();
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
 
-    if (email.isEmpty || password.isEmpty || name.isEmpty) return;
+    if (email.isEmpty || password.isEmpty || fullname.isEmpty) return;
 
     setState(() => _loading = true);
+    final customer = {
+      'fullname': fullname,
+      'username': username,
+      'password': password,
+      'email': email,
+      'companyntn' : "1234568-7"
+    };
 
     try {
       final response = await http.post(
-        Uri.parse('https://your-vps-domain.com/api/auth/signup'),
+        Uri.parse('http://145.79.8.129:3000/api/admin/add-customer'),
         headers: {'Content-Type': 'application/json'},
-        body: json.encode({'name': name, 'email': email, 'password': password}),
+        body: json.encode({'customer': customer}),
       );
 
       final data = json.decode(response.body);
 
-      if (response.statusCode == 200) {
+      if (response.statusCode == 201) {
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('Account created!')));
         Navigator.pushReplacementNamed(context, AppRoutes.login);
@@ -64,6 +73,11 @@ class _SignupScreenState extends State<SignupScreen> {
             TextField(
               controller: _nameController,
               decoration: const InputDecoration(labelText: 'Full Name'),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _usernameController,
+              decoration: const InputDecoration(labelText: 'Username'),
             ),
             const SizedBox(height: 16),
             TextField(
