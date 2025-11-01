@@ -40,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await prefs.setString('jwt_token', data['token']);
 
         if (!mounted) return;
-        Navigator.pushReplacementNamed(context, AppRoutes.home);
+        Navigator.pushReplacementNamed(context, AppRoutes.main);
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(data['message'] ?? 'Login failed')),

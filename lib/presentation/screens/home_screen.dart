@@ -18,7 +18,7 @@ class _HomeScreenState extends State<HomeScreen> {
   IOWebSocketChannel? _channel;
   bool _isStreaming = false;
   String _status = "Idle";
-  late Timer _sendTimer;
+  Timer? _sendTimer;
   late String _pcmPath;
 
   final String _serverUrl = "ws://127.0.0.1:5000/stream/live";
@@ -84,7 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> stopStreaming() async {
     try {
       await _recorder.stop();
-      _sendTimer.cancel();
+      _sendTimer?.cancel();
       _channel?.sink.close();
     } catch (_) {}
     setState(() {
@@ -95,11 +95,12 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _sendTimer.cancel();
-    _channel?.sink.close();
+    _sendTimer?.cancel(); // safely cancels if it's null
     _recorder.dispose();
+    _channel?.sink.close();
     super.dispose();
   }
+
 
   @override
   Widget build(BuildContext context) {
