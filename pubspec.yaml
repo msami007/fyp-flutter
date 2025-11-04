@@ -45,6 +45,7 @@ dependencies:
   flutter_blue_plus: ^1.30.0
   permission_handler: ^11.3.1
   audio_session: ^0.1.16
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -62,6 +63,8 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  assets:
+    - assets/audio/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

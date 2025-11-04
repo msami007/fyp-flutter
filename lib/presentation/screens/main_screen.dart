@@ -49,8 +49,8 @@ class _MainScreenState extends State<MainScreen> {
             label: 'Devices',
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person, color: Colors.blueAccent),
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings, color: Colors.blueAccent),
             label: 'Profile',
           ),
         ],

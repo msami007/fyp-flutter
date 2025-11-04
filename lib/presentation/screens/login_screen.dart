@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/api_endpoints.dart';
 import '../../routes/app_routes.dart';
+import '../../data/services/HearingProfileService.dart'; // ✅ you'll create this
+import '../screens/hearing_test_screen.dart'; // ✅ you'll create this
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -38,7 +40,35 @@ class _LoginScreenState extends State<LoginScreen> {
       if (response.statusCode == 200 && data['token'] != null) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', data['token']);
+        await prefs.setString('user_id', data['user']['_id']); // ✅ save userId
 
+        final userId = data['user']['_id'];
+        final hearingService = HearingProfileService();
+
+        // ✅ Step 1: check local profile
+        final localProfile = await hearingService.getLocalProfile();
+
+        if (localProfile == null) {
+          // ✅ Step 2: check remote (server) profile
+          final remoteProfile = await hearingService.fetchProfile(userId);
+
+          if (remoteProfile == null) {
+            // 🚀 No profile at all → go to hearing test
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => HearingTestScreen(userId: userId),
+              ),
+            );
+            return;
+          } else {
+            // ✅ Found remote profile → save locally
+            await hearingService.saveLocalProfile(remoteProfile);
+          }
+        }
+
+        // ✅ Proceed to main app
         if (!mounted) return;
         Navigator.pushReplacementNamed(context, AppRoutes.main);
       } else {
@@ -132,7 +162,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       style: TextStyle(fontSize: 16),
                     ),
                   ),
-                  const SizedBox(height: 10),
                 ],
               ),
             ),
