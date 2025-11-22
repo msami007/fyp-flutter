@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'connect_device_screen.dart';
+import 'menu_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -15,16 +16,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _pages = const [
     HomeScreen(),
     ConnectDeviceScreen(),
-    Center(
-      child: Text(
-        'Profile Page (Coming Soon)',
-        style: TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w500,
-          color: Colors.white,
-        ),
-      ),
-    ),
+    MenuScreen(),
   ];
 
   void _onItemTapped(int index) {
