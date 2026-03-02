@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../data/services/bluetooth_service.dart';
 
@@ -8,7 +9,7 @@ class ConnectDeviceScreen extends StatefulWidget {
   State<ConnectDeviceScreen> createState() => _ConnectDeviceScreenState();
 }
 
-class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
+class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> with WidgetsBindingObserver {
   final BluetoothServiceManager _btService = BluetoothServiceManager();
   String _deviceName = "Detecting audio device...";
   bool _initialized = false;
@@ -18,7 +19,21 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initializeAudioSession();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshDevice();
+    }
   }
 
   Future<void> _initializeAudioSession() async {
@@ -38,22 +53,52 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
 
   Future<void> _refreshDevice() async {
     setState(() => _isRefreshing = true);
-    await Future.delayed(const Duration(milliseconds: 500));
-    final name = await _btService.initAudioSession();
-    setState(() {
-      _deviceName = name;
-      _isRefreshing = false;
-    });
+
+    try {
+      // Try to get the actual Bluetooth device name
+      final name = await _btService.initAudioSession();
+
+      // If the name is generic (like phone name), try to get more specific device info
+      if (name == "Phone Speaker" || name.contains("Detecting") || name.contains("Unknown")) {
+        setState(() {
+          _deviceName = "Scanning for devices...";
+        });
+
+        // Simulate scanning
+        await Future.delayed(const Duration(seconds: 2));
+
+        // In a real app, you'd get the actual connected device name
+        // For now, show the name from the service
+        setState(() {
+          _deviceName = name;
+        });
+      } else {
+        setState(() {
+          _deviceName = name;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error refreshing device: $e');
+      setState(() {
+        _deviceName = "No device found";
+      });
+    } finally {
+      setState(() => _isRefreshing = false);
+    }
   }
 
   Future<void> _toggleSpeaker() async {
     setState(() => _isSpeakerMode = !_isSpeakerMode);
+
     if (_isSpeakerMode) {
-      setState(() => _deviceName = "Phone Speaker");
+      setState(() {
+        _deviceName = "Phone Speaker";
+      });
     } else {
-      setState(() => _deviceName = "Detecting audio device...");
-      final name = await _btService.initAudioSession();
-      setState(() => _deviceName = name);
+      setState(() {
+        _deviceName = "Switching to Bluetooth...";
+      });
+      await _refreshDevice();
     }
   }
 
@@ -97,9 +142,7 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
             ),
             child: IconButton(
               icon: const Icon(Icons.help_outline, color: Colors.white),
-              onPressed: () {
-                // Help action
-              },
+              onPressed: _showHelpDialog,
             ),
           ),
         ],
@@ -115,6 +158,41 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Bluetooth Status Warning (example)
+              if (!_isSpeakerMode && _deviceName.contains("No device") || _deviceName.contains("Error")) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.orange.withOpacity(0.3),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        color: Colors.orange,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          "No Bluetooth device detected. Please check your connection.",
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+
               // Main Device Card
               Container(
                 width: double.infinity,
@@ -157,13 +235,18 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                             gradient: LinearGradient(
                               colors: _isSpeakerMode
                                   ? [
-                                Color(0xFF4CAF50).withOpacity(0.8), // Green for speaker
-                                Color(0xFF2E7D32),
+                                const Color(0xFF4CAF50).withOpacity(0.8),
+                                const Color(0xFF2E7D32),
+                              ]
+                                  : (_deviceName.contains("No device") || _deviceName.contains("Error")
+                                  ? [
+                                Colors.grey.withOpacity(0.5),
+                                Colors.grey.withOpacity(0.3),
                               ]
                                   : [
                                 const Color(0xFF6C63FF).withOpacity(0.8),
                                 const Color(0xFF4A44B5),
-                              ],
+                              ]),
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
@@ -171,9 +254,11 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                             boxShadow: [
                               BoxShadow(
                                 color: (_isSpeakerMode
-                                    ? const Color(0xFF4CAF50) // Green
+                                    ? const Color(0xFF4CAF50)
+                                    : (_deviceName.contains("No device") || _deviceName.contains("Error")
+                                    ? Colors.grey
                                     : const Color(0xFF6C63FF)
-                                ).withOpacity(0.4),
+                                )).withOpacity(0.4),
                                 blurRadius: 15,
                                 spreadRadius: 3,
                                 offset: const Offset(0, 4),
@@ -181,7 +266,11 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                             ],
                           ),
                           child: Icon(
-                            _isSpeakerMode ? Icons.volume_up_rounded : Icons.headphones_rounded,
+                            _isSpeakerMode
+                                ? Icons.volume_up_rounded
+                                : (_deviceName.contains("No device") || _deviceName.contains("Error")
+                                ? Icons.bluetooth_disabled_rounded
+                                : Icons.bluetooth_rounded),
                             size: 36,
                             color: Colors.white,
                           ),
@@ -207,11 +296,19 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                           Icon(
                             Icons.circle,
                             size: 8,
-                            color: _isSpeakerMode ? const Color(0xFF4CAF50) : const Color(0xFF6C63FF),
+                            color: _isSpeakerMode
+                                ? const Color(0xFF4CAF50)
+                                : (_deviceName.contains("No device") || _deviceName.contains("Error")
+                                ? Colors.grey
+                                : const Color(0xFF6C63FF)),
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            "ACTIVE OUTPUT",
+                            _isSpeakerMode
+                                ? "SPEAKER MODE"
+                                : (_deviceName.contains("No device") || _deviceName.contains("Error")
+                                ? "NO DEVICE"
+                                : "DEVICE CONNECTED"),
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -249,7 +346,7 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          "Connected Device",
+                          _isSpeakerMode ? "Current Output" : "Connected Device",
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w500,
@@ -263,54 +360,48 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                     const SizedBox(height: 20),
 
                     // Mode Badge
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: _isSpeakerMode
-                              ? [
-                            const Color(0xFF4CAF50).withOpacity(0.2), // Green
-                            const Color(0xFF2E7D32).withOpacity(0.1),
-                          ]
-                              : [
-                            const Color(0xFF6C63FF).withOpacity(0.2),
-                            const Color(0xFF4A44B5).withOpacity(0.1),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: _isSpeakerMode
-                              ? const Color(0xFF4CAF50).withOpacity(0.4) // Green
-                              : const Color(0xFF6C63FF).withOpacity(0.4),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _isSpeakerMode ? Icons.volume_up_rounded : Icons.bluetooth_rounded,
-                            size: 18,
-                            color: _isSpeakerMode ? const Color(0xFF4CAF50) : const Color(0xFF6C63FF),
+                    if (!_isSpeakerMode && !_deviceName.contains("No device") && !_deviceName.contains("Error"))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              const Color(0xFF6C63FF).withOpacity(0.2),
+                              const Color(0xFF4A44B5).withOpacity(0.1),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _isSpeakerMode ? "SPEAKER MODE" : "BLUETOOTH MODE",
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                              color: _isSpeakerMode ? const Color(0xFF4CAF50) : const Color(0xFF6C63FF),
-                              letterSpacing: 1.3,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFF6C63FF).withOpacity(0.4),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.bluetooth_rounded,
+                              size: 18,
+                              color: Color(0xFF6C63FF),
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Text(
+                              "BLUETOOTH AUDIO",
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: const Color(0xFF6C63FF),
+                                letterSpacing: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
 
                     // Connection Quality Indicator
-                    if (!_isSpeakerMode) ...[
+                    if (!_isSpeakerMode && !_deviceName.contains("No device") && !_deviceName.contains("Error")) ...[
                       const SizedBox(height: 20),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -324,11 +415,11 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                             Icon(
                               Icons.signal_cellular_alt_rounded,
                               size: 16,
-                              color: const Color(0xFF4CAF50), // Green for good connection
+                              color: const Color(0xFF4CAF50),
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              "Strong Connection",
+                              "Connected",
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -383,7 +474,7 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                                   height: 20,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation(Colors.white.withOpacity(0.8)),
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white.withOpacity(0.8)),
                                   ),
                                 )
                               else
@@ -427,7 +518,7 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Icon(
-                                _isSpeakerMode ? Icons.headphones_rounded : Icons.volume_up_rounded,
+                                _isSpeakerMode ? Icons.bluetooth_rounded : Icons.volume_up_rounded,
                                 color: _isSpeakerMode ? const Color(0xFF6C63FF) : const Color(0xFF4CAF50),
                               ),
                               const SizedBox(width: 12),
@@ -493,7 +584,11 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                "Pair or switch Bluetooth devices from your phone's settings. Make sure your device is in pairing mode and within range.",
+                                "Make sure your Bluetooth device is:\n"
+                                    "• Turned on and paired with your phone\n"
+                                    "• Within range (less than 10 meters)\n"
+                                    "• Selected as audio output in phone settings\n\n"
+                                    "If your device doesn't appear, try refreshing or check your Bluetooth settings.",
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.white.withOpacity(0.6),
@@ -514,8 +609,51 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> {
       )
           : const Center(
         child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation(Color(0xFF6C63FF)),
+          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF6C63FF)),
         ),
+      ),
+    );
+  }
+
+  void _showHelpDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2139),
+        title: const Text(
+          "Audio Output Help",
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "How it works:",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "• Speaker Mode: Audio plays through your phone's speakers\n"
+                  "• Bluetooth Mode: Audio plays through connected Bluetooth device\n\n"
+                  "To connect a Bluetooth device:\n"
+                  "1. Enable Bluetooth on your phone\n"
+                  "2. Pair your device in phone settings\n"
+                  "3. Return to this screen and tap Refresh\n"
+                  "4. The device name should appear above",
+              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              "Got it",
+              style: TextStyle(color: Color(0xFF6C63FF)),
+            ),
+          ),
+        ],
       ),
     );
   }
