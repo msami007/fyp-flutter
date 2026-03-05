@@ -6,6 +6,9 @@ import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:audioplayers/audioplayers.dart';
+import '../../data/services/noise_suppression_service.dart';
+import '../../data/services/voice_isolation_service.dart';
+import '../../data/services/transcription_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,6 +28,16 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   List<FileSystemEntity> _recordings = [];
   late AnimationController _animationController;
   late Animation<double> _pulseAnimation;
+
+  // ── AI Processing Toggles ──
+  final NoiseSuppressionService _noiseSuppression = NoiseSuppressionService();
+  final VoiceIsolationService _voiceIsolation = VoiceIsolationService();
+  final TranscriptionService _transcription = TranscriptionService();
+  bool _enhanceEnabled = false;
+  bool _isolateEnabled = false;
+  bool _transcribeEnabled = false;
+  String _liveTranscript = '';
+  bool _aiModelsLoaded = false;
 
   @override
   void initState() {
@@ -50,7 +63,21 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadRecordings();
+      _initAIModels();
     });
+  }
+
+  Future<void> _initAIModels() async {
+    try {
+      final ns = await _noiseSuppression.initialize();
+      final vi = await _voiceIsolation.initialize();
+      final tr = await _transcription.initialize();
+      _aiModelsLoaded = ns || vi || tr;
+      if (mounted) setState(() {});
+      debugPrint('AI models loaded: NS=$ns, VI=$vi, TR=$tr');
+    } catch (e) {
+      debugPrint('AI model init error: $e');
+    }
   }
 
   Future<String?> _getRecordingDirectory() async {
@@ -474,12 +501,57 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  Widget _buildToggleChip({
+    required IconData icon,
+    required String label,
+    required bool isActive,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isActive
+                ? const Color(0xFF6C63FF).withOpacity(0.25)
+                : Colors.white.withOpacity(0.05),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isActive
+                  ? const Color(0xFF6C63FF).withOpacity(0.6)
+                  : Colors.white.withOpacity(0.1),
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, size: 20,
+                  color: isActive ? const Color(0xFF6C63FF) : Colors.white.withOpacity(0.5)),
+              const SizedBox(height: 4),
+              Text(label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                  color: isActive ? const Color(0xFF6C63FF) : Colors.white.withOpacity(0.5),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _recordingTimer?.cancel();
     _recorder.dispose();
     _audioPlayer.dispose();
     _animationController.dispose();
+    _noiseSuppression.dispose();
+    _voiceIsolation.dispose();
+    _transcription.dispose();
     super.dispose();
   }
 
@@ -591,6 +663,108 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       ),
                       textAlign: TextAlign.center,
                     ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── AI Processing Toggles ──
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E2139),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.auto_awesome, color: Color(0xFF6C63FF), size: 16),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'AI Processing',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _aiModelsLoaded
+                                ? const Color(0xFF4CAF50).withOpacity(0.2)
+                                : Colors.orange.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            _aiModelsLoaded ? 'Models Ready' : 'Loading...',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: _aiModelsLoaded ? const Color(0xFF4CAF50) : Colors.orange,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        _buildToggleChip(
+                          icon: Icons.noise_aware,
+                          label: 'Enhance',
+                          isActive: _enhanceEnabled,
+                          onTap: () {
+                            setState(() {
+                              _enhanceEnabled = !_enhanceEnabled;
+                              if (_enhanceEnabled) _isolateEnabled = false;
+                            });
+                            if (_enhanceEnabled) _noiseSuppression.startSession();
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _buildToggleChip(
+                          icon: Icons.record_voice_over,
+                          label: 'Isolate',
+                          isActive: _isolateEnabled,
+                          onTap: () {
+                            setState(() {
+                              _isolateEnabled = !_isolateEnabled;
+                              if (_isolateEnabled) _enhanceEnabled = false;
+                            });
+                            if (_isolateEnabled) _voiceIsolation.startSession();
+                          },
+                        ),
+                        const SizedBox(width: 8),
+                        _buildToggleChip(
+                          icon: Icons.subtitles,
+                          label: 'Transcribe',
+                          isActive: _transcribeEnabled,
+                          onTap: () {
+                            setState(() => _transcribeEnabled = !_transcribeEnabled);
+                          },
+                        ),
+                      ],
+                    ),
+                    if (_transcribeEnabled && _liveTranscript.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.3),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          _liveTranscript,
+                          style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

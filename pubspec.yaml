@@ -31,7 +31,6 @@ dependencies:
   flutter:
     sdk: flutter
   web_socket_channel: ^3.0.3
-  flutter_bluetooth_serial: ^0.4.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -47,6 +46,11 @@ dependencies:
   permission_handler: ^11.3.1
   audio_session: ^0.1.16
   audioplayers: ^6.1.0
+
+  # Local AI models
+  whisper_flutter_new: ^1.0.1   # Local Whisper transcription via whisper.cpp
+  tflite_flutter: ^0.11.0       # TFLite runtime for RNNoise/DTLN models
+  sqflite: ^2.4.1               # Local SQLite DB for conversation history
 
 dev_dependencies:
   flutter_test:

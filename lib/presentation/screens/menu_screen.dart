@@ -109,6 +109,32 @@ class _MenuScreenState extends State<MenuScreen> {
             onTap: _takeHearingProfileAgain,
           ),
           const Divider(color: Colors.white10),
+          // ── AI Features ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text('AI Features', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white.withOpacity(0.4), letterSpacing: 1)),
+          ),
+          ListTile(
+            leading: const Icon(Icons.subtitles_rounded, color: Color(0xFF6C63FF)),
+            title: const Text('Live Transcription', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Speech-to-text (offline)', style: TextStyle(color: Colors.white70)),
+            onTap: () => Navigator.pushNamed(context, AppRoutes.transcription),
+          ),
+          const Divider(color: Colors.white10),
+          ListTile(
+            leading: const Icon(Icons.history_rounded, color: Color(0xFF6C63FF)),
+            title: const Text('Conversation History', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('View saved transcripts', style: TextStyle(color: Colors.white70)),
+            onTap: () => Navigator.pushNamed(context, AppRoutes.conversationHistory),
+          ),
+          const Divider(color: Colors.white10),
+          ListTile(
+            leading: const Icon(Icons.model_training, color: Color(0xFF6C63FF)),
+            title: const Text('AI Models', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Download models for better accuracy', style: TextStyle(color: Colors.white70)),
+            onTap: () => Navigator.pushNamed(context, AppRoutes.modelSettings),
+          ),
+          const Divider(color: Colors.white10),
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.white),
             title: const Text('Logout', style: TextStyle(color: Colors.white)),
