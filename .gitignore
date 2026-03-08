@@ -43,3 +43,6 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Large AI model files (downloaded via: dart run tool/download_models.dart)
+assets/models/*.zip
