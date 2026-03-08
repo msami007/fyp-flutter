@@ -253,6 +253,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           encoder: AudioEncoder.pcm16bits,
           sampleRate: 16000,
           numChannels: 1,
+          // Built-in Android audio processing based on toggles
+          noiseSuppress: _enhanceEnabled || _isolateEnabled,
+          echoCancel: _isolateEnabled,
+          autoGain: _enhanceEnabled || _isolateEnabled,
         ),
         path: recordingPath,
       );
@@ -719,9 +723,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           onTap: () {
                             setState(() {
                               _enhanceEnabled = !_enhanceEnabled;
-                              if (_enhanceEnabled) _isolateEnabled = false;
                             });
-                            if (_enhanceEnabled) _noiseSuppression.startSession();
+                            _noiseSuppression.setEnabled(_enhanceEnabled);
                           },
                         ),
                         const SizedBox(width: 8),
@@ -732,9 +735,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                           onTap: () {
                             setState(() {
                               _isolateEnabled = !_isolateEnabled;
-                              if (_isolateEnabled) _enhanceEnabled = false;
                             });
-                            if (_isolateEnabled) _voiceIsolation.startSession();
+                            _voiceIsolation.setEnabled(_isolateEnabled);
                           },
                         ),
                         const SizedBox(width: 8),

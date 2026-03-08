@@ -153,7 +153,8 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white)),
         centerTitle: true,
       ),
-      body: Padding(
+      body: SafeArea(
+        child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
@@ -249,6 +250,7 @@ class _ConversationHistoryScreenState extends State<ConversationHistoryScreen> {
                         ),
             ),
           ],
+        ),
         ),
       ),
     );

@@ -32,57 +32,64 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0E27),
       body: SafeArea(
-        bottom: false,
         child: _pages[_selectedIndex],
       ),
-      bottomNavigationBar: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E2139),
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 20,
-              spreadRadius: 2,
-              offset: const Offset(0, 4),
-            ),
-          ],
-          border: Border.all(
-            color: Colors.white.withOpacity(0.1),
-            width: 1,
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: Container(
+          margin: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: 8,
+            top: 8,
           ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8), // Reduced horizontal padding
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(
-                icon: Icons.home_outlined,
-                activeIcon: Icons.home_rounded,
-                label: 'Home',
-                index: 0,
-              ),
-              _buildNavItem(
-                icon: Icons.bluetooth_outlined,
-                activeIcon: Icons.bluetooth_rounded,
-                label: 'Devices',
-                index: 1,
-              ),
-              _buildNavItem(
-                icon: Icons.transcribe_outlined, // New transcription icon
-                activeIcon: Icons.transcribe_rounded,
-                label: 'Transcribe',
-                index: 2,
-              ),
-              _buildNavItem(
-                icon: Icons.person_outline_rounded,
-                activeIcon: Icons.person_rounded,
-                label: 'Profile',
-                index: 3,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E2139),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.3),
+                blurRadius: 20,
+                spreadRadius: 2,
+                offset: const Offset(0, 4),
               ),
             ],
+            border: Border.all(
+              color: Colors.white.withOpacity(0.1),
+              width: 1,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildNavItem(
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home_rounded,
+                  label: 'Home',
+                  index: 0,
+                ),
+                _buildNavItem(
+                  icon: Icons.bluetooth_outlined,
+                  activeIcon: Icons.bluetooth_rounded,
+                  label: 'Devices',
+                  index: 1,
+                ),
+                _buildNavItem(
+                  icon: Icons.transcribe_outlined,
+                  activeIcon: Icons.transcribe_rounded,
+                  label: 'Transcribe',
+                  index: 2,
+                ),
+                _buildNavItem(
+                  icon: Icons.person_outline_rounded,
+                  activeIcon: Icons.person_rounded,
+                  label: 'Profile',
+                  index: 3,
+                ),
+              ],
+            ),
           ),
         ),
       ),

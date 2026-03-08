@@ -116,7 +116,8 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
         ),
         centerTitle: true,
       ),
-      body: _isLoading
+      body: SafeArea(
+        child: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF6C63FF)))
           : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
@@ -179,6 +180,7 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
                 ],
               ),
             ),
+      ),
     );
   }
 

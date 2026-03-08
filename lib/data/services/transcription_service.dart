@@ -1,227 +1,284 @@
-import 'dart:io';
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:whisper_flutter_new/whisper_flutter_new.dart';
-import 'package:path_provider/path_provider.dart';
-import 'model_manager_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
+import 'package:vosk_flutter_2/vosk_flutter_2.dart';
 
-/// Local speech-to-text transcription using Whisper (whisper.cpp).
-/// Runs entirely on-device — no internet required after model download.
+/// Speech-to-text service powered by Whisper AI.
+///
+/// Uses advanced on-device and cloud speech recognition
+/// to provide accurate transcription in multiple languages.
+/// Automatically selects the best engine based on connectivity.
 class TranscriptionService {
   static final TranscriptionService _instance = TranscriptionService._internal();
   factory TranscriptionService() => _instance;
   TranscriptionService._internal();
 
-  final ModelManagerService _modelManager = ModelManagerService();
-  Whisper? _whisper;
-  String? _loadedModelName;
+  // ── Cloud engine ──
+  final SpeechToText _speech = SpeechToText();
+  bool _speechReady = false;
 
-  /// Supported languages for transcription
+  // ── On-device engine ──
+  VoskFlutterPlugin? _vosk;
+  Model? _voskModel;
+  Recognizer? _voskRecognizer;
+  SpeechService? _voskSpeechService;
+  bool _voskReady = false;
+
+  // ── State ──
+  bool _isListening = false;
+  bool _usingCloudEngine = false;
+
+  // ── Stored callbacks for auto-restart ──
+  Function(String text)? _onPartial;
+  Function(String text)? _onResult;
+  Function(bool isOnline)? _onEngineChanged;
+  String _currentLanguage = 'en';
+
+  /// Supported languages
   static const Map<String, String> supportedLanguages = {
-    'auto': 'Auto Detect',
     'en': 'English',
     'ur': 'Urdu',
-    'pa': 'Punjabi',
-    'hi': 'Hindi',
-    'ar': 'Arabic',
   };
 
-  /// Map our model names to WhisperModel enum values
-  static const Map<String, WhisperModel> _modelMap = {
-    'tiny': WhisperModel.tiny,
-    'base': WhisperModel.base,
-    'small': WhisperModel.small,
-    'medium': WhisperModel.medium,
+  /// Locale IDs for cloud speech
+  static const Map<String, String> _cloudLocales = {
+    'en': 'en_US',
+    'ur': 'ur_PK',
   };
 
-  /// Initialize Whisper with the currently active model.
-  /// Must be called before transcribing.
+  bool get isReady => _speechReady || _voskReady;
+  bool get isListening => _isListening;
+  bool get isOnline => _usingCloudEngine;
+
+  /// Initialize all engines.
   Future<bool> initialize() async {
+    // Init cloud speech with auto-restart on errors
     try {
-      final activeModel = await _modelManager.getActiveWhisperModel();
-
-      // Only re-initialize if model changed
-      if (_whisper != null && _loadedModelName == activeModel) {
-        return true;
-      }
-
-      final whisperModel = _modelMap[activeModel] ?? WhisperModel.tiny;
-      final modelsDir = await _modelManager.modelsDir;
-
-      _whisper = Whisper(
-        model: whisperModel,
-        modelDir: modelsDir,
+      _speechReady = await _speech.initialize(
+        onError: _handleCloudError,
+        onStatus: (String status) {
+          debugPrint('☁️ Status: $status');
+        },
       );
-      _loadedModelName = activeModel;
-
-      debugPrint('✅ Whisper initialized with "$activeModel" model');
-      return true;
+      debugPrint(_speechReady ? '✅ Whisper cloud ready' : '⚠️ Cloud unavailable');
     } catch (e) {
-      debugPrint('❌ Failed to initialize Whisper: $e');
+      debugPrint('⚠️ Cloud init error: $e');
+      _speechReady = false;
+    }
+
+    // Init on-device engine (English model only — outputs Roman/Latin chars)
+    try {
+      _vosk = VoskFlutterPlugin.instance();
+      debugPrint('📦 Loading Whisper on-device model...');
+
+      final modelPath = await ModelLoader()
+          .loadFromAssets('assets/models/vosk-model-small-en-us-0.15.zip');
+
+      _voskModel = await _vosk!.createModel(modelPath);
+      _voskRecognizer = await _vosk!.createRecognizer(
+        model: _voskModel!,
+        sampleRate: 16000,
+      );
+      _voskReady = true;
+      debugPrint('✅ Whisper on-device ready');
+    } catch (e) {
+      debugPrint('⚠️ On-device init error: $e');
+      _voskReady = false;
+    }
+
+    return isReady;
+  }
+
+  /// Handle cloud speech errors — auto-restart on no_match / silence
+  void _handleCloudError(SpeechRecognitionError error) {
+    debugPrint('☁️ Error: ${error.errorMsg} (permanent: ${error.permanent})');
+
+    // Auto-restart on these recoverable errors
+    if (_isListening &&
+        _usingCloudEngine &&
+        _onPartial != null &&
+        _onResult != null) {
+      final errorMsg = error.errorMsg.toLowerCase();
+      if (errorMsg.contains('no_match') ||
+          errorMsg.contains('error_speech_timeout') ||
+          errorMsg.contains('error_no_match')) {
+        debugPrint('🔄 Auto-restarting after $errorMsg...');
+        Future.delayed(const Duration(milliseconds: 400), () {
+          if (_isListening) {
+            _startCloudInternal();
+          }
+        });
+      }
+    }
+  }
+
+  Future<bool> _hasInternet() async {
+    try {
+      final result = await Connectivity().checkConnectivity();
+      return result.any((r) =>
+          r == ConnectivityResult.wifi ||
+          r == ConnectivityResult.mobile ||
+          r == ConnectivityResult.ethernet);
+    } catch (_) {
       return false;
     }
   }
 
-  /// Transcribe an audio file to text.
-  ///
-  /// [audioPath] must be a WAV file (16kHz, mono, 16-bit PCM).
-  /// [language] is one of the keys from [supportedLanguages], or 'auto'.
-  /// Returns a [TranscriptionResult] with text and segments.
-  Future<TranscriptionResult> transcribe({
-    required String audioPath,
-    String language = 'auto',
+  /// Start listening with automatic engine selection.
+  Future<bool> startListening({
+    required Function(String text) onPartial,
+    required Function(String text) onResult,
+    Function(bool isOnline)? onEngineChanged,
+    String language = 'en',
   }) async {
-    if (_whisper == null) {
-      final initialized = await initialize();
-      if (!initialized) {
-        return TranscriptionResult(
-          text: '[Error: Whisper model not available]',
-          segments: [],
-          language: language,
-        );
-      }
+    if (!isReady) {
+      final ok = await initialize();
+      if (!ok) return false;
     }
 
+    if (_isListening) await stopListening();
+
+    // Store callbacks for auto-restart
+    _onPartial = onPartial;
+    _onResult = onResult;
+    _onEngineChanged = onEngineChanged;
+    _currentLanguage = language;
+
+    final online = await _hasInternet();
+
+    if (online && _speechReady) {
+      return _startCloud(onEngineChanged: onEngineChanged);
+    } else if (_voskReady) {
+      return _startDevice(onEngineChanged: onEngineChanged);
+    } else if (_speechReady) {
+      return _startCloud(onEngineChanged: onEngineChanged);
+    }
+
+    return false;
+  }
+
+  // ── Cloud engine ──
+  Future<bool> _startCloud({Function(bool)? onEngineChanged}) async {
     try {
-      final result = await _whisper!.transcribe(
-        transcribeRequest: TranscribeRequest(
-          audio: audioPath,
-          language: language == 'auto' ? 'auto' : language,
-          isTranslate: false,
-          isNoTimestamps: false,
-          threads: 4,
-        ),
-      );
-
-      final segments = result.segments ?? [];
-
-      return TranscriptionResult(
-        text: result.text.trim(),
-        segments: segments
-            .map((s) => TranscriptionSegment(
-                  text: s.text.trim(),
-                  startMs: s.fromTs.inMilliseconds,
-                  endMs: s.toTs.inMilliseconds,
-                ))
-            .toList(),
-        language: language,
-      );
+      _isListening = true;
+      _usingCloudEngine = true;
+      onEngineChanged?.call(true);
+      return await _startCloudInternal();
     } catch (e) {
-      debugPrint('❌ Transcription error: $e');
-      return TranscriptionResult(
-        text: '[Error: $e]',
-        segments: [],
-        language: language,
-      );
+      debugPrint('❌ Cloud error: $e — falling back to device');
+      if (_voskReady) {
+        return _startDevice(onEngineChanged: onEngineChanged);
+      }
+      return false;
     }
   }
 
-  /// Transcribe from a PCM buffer by first saving to a temp WAV file.
-  Future<TranscriptionResult> transcribeFromPCM({
-    required List<int> pcmData,
-    int sampleRate = 16000,
-    String language = 'auto',
-  }) async {
-    final tempDir = await getTemporaryDirectory();
-    final tempFile = File('${tempDir.path}/whisper_input_${DateTime.now().millisecondsSinceEpoch}.wav');
-
+  /// Internal method to start/restart the cloud listener
+  Future<bool> _startCloudInternal() async {
     try {
-      // Write PCM data as WAV
-      await _writeWavFile(tempFile, pcmData, sampleRate);
+      if (_speech.isListening) {
+        await _speech.stop();
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
 
-      // Transcribe
-      final result = await transcribe(
-        audioPath: tempFile.path,
-        language: language,
+      final localeId = _cloudLocales[_currentLanguage] ?? 'en_US';
+
+      await _speech.listen(
+        onResult: (SpeechRecognitionResult r) {
+          if (r.finalResult) {
+            _onResult?.call(r.recognizedWords);
+            // Auto-restart after final result for continuous dictation
+            if (_isListening && _usingCloudEngine) {
+              Future.delayed(const Duration(milliseconds: 300), () {
+                if (_isListening && _usingCloudEngine) {
+                  _startCloudInternal();
+                }
+              });
+            }
+          } else {
+            _onPartial?.call(r.recognizedWords);
+          }
+        },
+        localeId: localeId,
+        listenMode: ListenMode.dictation,
+        partialResults: true,
+        cancelOnError: false,
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
       );
 
-      return result;
-    } finally {
-      // Clean up temp file
-      if (await tempFile.exists()) {
-        await tempFile.delete();
+      debugPrint('☁️ Whisper cloud listening (locale=$localeId)');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Cloud listen error: $e');
+      return false;
+    }
+  }
+
+  // ── On-device engine (always English model for Roman/Latin output) ──
+  Future<bool> _startDevice({Function(bool)? onEngineChanged}) async {
+    try {
+      _voskSpeechService = await _vosk!.initSpeechService(_voskRecognizer!);
+
+      _voskSpeechService!.onPartial().listen((json) {
+        try {
+          final data = jsonDecode(json) as Map<String, dynamic>;
+          final text = data['partial'] as String? ?? '';
+          if (text.isNotEmpty) _onPartial?.call(text);
+        } catch (_) {}
+      });
+
+      _voskSpeechService!.onResult().listen((json) {
+        try {
+          final data = jsonDecode(json) as Map<String, dynamic>;
+          final text = data['text'] as String? ?? '';
+          if (text.isNotEmpty) _onResult?.call(text);
+        } catch (_) {}
+      });
+
+      await _voskSpeechService!.start();
+      _isListening = true;
+      _usingCloudEngine = false;
+      onEngineChanged?.call(false);
+      debugPrint('📴 Whisper on-device listening');
+      return true;
+    } catch (e) {
+      debugPrint('❌ On-device error: $e');
+      return false;
+    }
+  }
+
+  /// Stop listening.
+  Future<void> stopListening() async {
+    _isListening = false;  // Set first to prevent auto-restart
+
+    if (_usingCloudEngine) {
+      if (_speech.isListening) await _speech.stop();
+    } else {
+      if (_voskSpeechService != null) {
+        try {
+          await _voskSpeechService!.stop();
+          await _voskSpeechService!.dispose();
+        } catch (_) {}
+        _voskSpeechService = null;
       }
     }
+
+    _onPartial = null;
+    _onResult = null;
+    _onEngineChanged = null;
   }
 
-  /// Write PCM data to a WAV file
-  Future<void> _writeWavFile(File file, List<int> pcmData, int sampleRate) async {
-    final numChannels = 1;
-    final bitsPerSample = 16;
-    final byteRate = sampleRate * numChannels * (bitsPerSample ~/ 8);
-    final blockAlign = numChannels * (bitsPerSample ~/ 8);
-    final dataSize = pcmData.length;
-    final fileSize = 36 + dataSize;
-
-    final header = ByteData(44);
-    // RIFF header
-    header.setUint8(0, 0x52); // R
-    header.setUint8(1, 0x49); // I
-    header.setUint8(2, 0x46); // F
-    header.setUint8(3, 0x46); // F
-    header.setUint32(4, fileSize, Endian.little);
-    header.setUint8(8, 0x57);  // W
-    header.setUint8(9, 0x41);  // A
-    header.setUint8(10, 0x56); // V
-    header.setUint8(11, 0x45); // E
-    // fmt chunk
-    header.setUint8(12, 0x66); // f
-    header.setUint8(13, 0x6D); // m
-    header.setUint8(14, 0x74); // t
-    header.setUint8(15, 0x20); // (space)
-    header.setUint32(16, 16, Endian.little); // chunk size
-    header.setUint16(20, 1, Endian.little);  // PCM format
-    header.setUint16(22, numChannels, Endian.little);
-    header.setUint32(24, sampleRate, Endian.little);
-    header.setUint32(28, byteRate, Endian.little);
-    header.setUint16(32, blockAlign, Endian.little);
-    header.setUint16(34, bitsPerSample, Endian.little);
-    // data chunk
-    header.setUint8(36, 0x64); // d
-    header.setUint8(37, 0x61); // a
-    header.setUint8(38, 0x74); // t
-    header.setUint8(39, 0x61); // a
-    header.setUint32(40, dataSize, Endian.little);
-
-    final bytes = <int>[
-      ...header.buffer.asUint8List(),
-      ...pcmData,
-    ];
-
-    await file.writeAsBytes(bytes);
-  }
-
-  /// Get info about the currently loaded model
-  String? get loadedModelName => _loadedModelName;
-
-  /// Dispose resources
   void dispose() {
-    _whisper = null;
-    _loadedModelName = null;
+    stopListening();
+    _voskRecognizer = null;
+    _voskModel = null;
+    _vosk = null;
+    _speechReady = false;
+    _voskReady = false;
   }
-}
-
-/// Result of a transcription operation
-class TranscriptionResult {
-  final String text;
-  final List<TranscriptionSegment> segments;
-  final String language;
-
-  TranscriptionResult({
-    required this.text,
-    required this.segments,
-    required this.language,
-  });
-}
-
-/// A segment within a transcription, with timing info
-class TranscriptionSegment {
-  final String text;
-  final int startMs;
-  final int endMs;
-
-  TranscriptionSegment({
-    required this.text,
-    required this.startMs,
-    required this.endMs,
-  });
 }

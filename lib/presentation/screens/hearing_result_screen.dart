@@ -102,7 +102,8 @@ class _HearingResultScreenState extends State<HearingResultScreen> with SingleTi
         ),
         centerTitle: true,
       ),
-      body: FadeTransition(
+      body: SafeArea(
+        child: FadeTransition(
         opacity: _fadeAnimation,
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
@@ -286,6 +287,7 @@ class _HearingResultScreenState extends State<HearingResultScreen> with SingleTi
             ],
           ),
         ),
+      ),
       ),
     );
   }

@@ -43,16 +43,16 @@ dependencies:
   record: ^6.1.2
   path_provider: ^2.1.5
   flutter_blue_plus: ^2.2.1
-  permission_handler: ^12.0.1
+  permission_handler: ^11.4.0
   audio_session: ^0.2.2
   audioplayers: ^6.1.0
   speech_to_text: ^7.3.0
   google_speech: ^2.1.0
+  vosk_flutter_2: ^1.0.5         # Truly offline speech recognition
 
-  # Local AI models
-  whisper_flutter_new: ^1.0.1   # Local Whisper transcription via whisper.cpp
-  tflite_flutter: ^0.11.0       # TFLite runtime for RNNoise/DTLN models
+  # Local AI / data
   sqflite: ^2.4.1               # Local SQLite DB for conversation history
+  connectivity_plus: ^7.0.0
 
 dev_dependencies:
   flutter_test:
@@ -72,6 +72,7 @@ dev_dependencies:
 flutter:
   assets:
     - assets/audio/
+    - assets/models/
 
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in

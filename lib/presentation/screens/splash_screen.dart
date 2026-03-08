@@ -78,7 +78,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
+      body: SafeArea(
+        child: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -251,6 +252,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
               ),
             ),
           ],
+        ),
         ),
       ),
     );

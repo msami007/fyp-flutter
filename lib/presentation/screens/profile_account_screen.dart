@@ -32,7 +32,8 @@ class _ProfileAccountScreenState extends State<ProfileAccountScreen> {
         backgroundColor: const Color(0xFF1E2139),
       ),
       backgroundColor: const Color(0xFF0A0E27),
-      body: Padding(
+      body: SafeArea(
+        child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -50,6 +51,7 @@ class _ProfileAccountScreenState extends State<ProfileAccountScreen> {
             const SizedBox(height: 12),
             const Text('Additional account details will appear here.', style: TextStyle(color: Colors.white54)),
           ],
+        ),
         ),
       ),
     );
