@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
+import 'live_assist_screen.dart';
 import 'connect_device_screen.dart';
 import 'menu_screen.dart';
-import 'transcription_screen.dart'; // You'll need to create this file
+import 'transcription_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -16,8 +17,9 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _pages = const [
     HomeScreen(),
+    LiveAssistScreen(),
     ConnectDeviceScreen(),
-    TranscriptionScreen(), // New transcription screen
+    TranscriptionScreen(),
     MenuScreen(),
   ];
 
@@ -71,22 +73,28 @@ class _MainScreenState extends State<MainScreen> {
                   index: 0,
                 ),
                 _buildNavItem(
+                  icon: Icons.hearing_outlined,
+                  activeIcon: Icons.hearing_rounded,
+                  label: 'Assist',
+                  index: 1,
+                ),
+                _buildNavItem(
                   icon: Icons.bluetooth_outlined,
                   activeIcon: Icons.bluetooth_rounded,
                   label: 'Devices',
-                  index: 1,
+                  index: 2,
                 ),
                 _buildNavItem(
                   icon: Icons.transcribe_outlined,
                   activeIcon: Icons.transcribe_rounded,
                   label: 'Transcribe',
-                  index: 2,
+                  index: 3,
                 ),
                 _buildNavItem(
                   icon: Icons.person_outline_rounded,
                   activeIcon: Icons.person_rounded,
                   label: 'Profile',
-                  index: 3,
+                  index: 4,
                 ),
               ],
             ),

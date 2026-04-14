@@ -6,6 +6,7 @@ import 'package:speech_to_text/speech_to_text.dart';
 import 'package:speech_to_text/speech_recognition_result.dart';
 import 'package:speech_to_text/speech_recognition_error.dart';
 import 'package:vosk_flutter_2/vosk_flutter_2.dart';
+import '../utils/devanagari_to_roman.dart';
 
 /// Speech-to-text service powered by Whisper AI.
 ///
@@ -23,7 +24,8 @@ class TranscriptionService {
 
   // ── On-device engine ──
   VoskFlutterPlugin? _vosk;
-  Model? _voskModel;
+  Model? _voskModelEn;    // English
+  Model? _voskModelHi;    // Hindi (for Urdu — transliterated to Roman)
   Recognizer? _voskRecognizer;
   SpeechService? _voskSpeechService;
   bool _voskReady = false;
@@ -60,9 +62,7 @@ class TranscriptionService {
     try {
       _speechReady = await _speech.initialize(
         onError: _handleCloudError,
-        onStatus: (String status) {
-          debugPrint('☁️ Status: $status');
-        },
+        onStatus: _handleCloudStatus,
       );
       debugPrint(_speechReady ? '✅ Whisper cloud ready' : '⚠️ Cloud unavailable');
     } catch (e) {
@@ -70,17 +70,28 @@ class TranscriptionService {
       _speechReady = false;
     }
 
-    // Init on-device engine (English model only — outputs Roman/Latin chars)
+    // Init on-device engines
     try {
       _vosk = VoskFlutterPlugin.instance();
-      debugPrint('📦 Loading Whisper on-device model...');
+      debugPrint('📦 Loading Whisper on-device models...');
 
-      final modelPath = await ModelLoader()
+      // English model
+      final enPath = await ModelLoader()
           .loadFromAssets('assets/models/vosk-model-small-en-us-0.15.zip');
+      _voskModelEn = await _vosk!.createModel(enPath);
 
-      _voskModel = await _vosk!.createModel(modelPath);
+      // Hindi model (for Urdu — output will be transliterated to Roman)
+      try {
+        final hiPath = await ModelLoader()
+            .loadFromAssets('assets/models/vosk-model-small-hi-0.22.zip');
+        _voskModelHi = await _vosk!.createModel(hiPath);
+        debugPrint('✅ Hindi/Urdu on-device model loaded');
+      } catch (e) {
+        debugPrint('⚠️ Hindi model not available: $e');
+      }
+
       _voskRecognizer = await _vosk!.createRecognizer(
-        model: _voskModel!,
+        model: _voskModelEn!,
         sampleRate: 16000,
       );
       _voskReady = true;
@@ -93,25 +104,47 @@ class TranscriptionService {
     return isReady;
   }
 
-  /// Handle cloud speech errors — auto-restart on no_match / silence
+  /// Handle cloud speech status — auto-restart when session ends
+  void _handleCloudStatus(String status) {
+    debugPrint('☁️ Status: $status');
+
+    // When the session finishes ("done" / "notListening"), auto-restart
+    if ((status == 'done' || status == 'notListening') &&
+        _isListening &&
+        _usingCloudEngine) {
+      debugPrint('🔄 Session ended ($status) — auto-restarting...');
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (_isListening && _usingCloudEngine) {
+          _startCloudInternal();
+        }
+      });
+    }
+  }
+
+  /// Handle cloud speech errors — auto-restart on recoverable errors
   void _handleCloudError(SpeechRecognitionError error) {
     debugPrint('☁️ Error: ${error.errorMsg} (permanent: ${error.permanent})');
 
-    // Auto-restart on these recoverable errors
-    if (_isListening &&
-        _usingCloudEngine &&
-        _onPartial != null &&
-        _onResult != null) {
-      final errorMsg = error.errorMsg.toLowerCase();
-      if (errorMsg.contains('no_match') ||
-          errorMsg.contains('error_speech_timeout') ||
-          errorMsg.contains('error_no_match')) {
-        debugPrint('🔄 Auto-restarting after $errorMsg...');
-        Future.delayed(const Duration(milliseconds: 400), () {
-          if (_isListening) {
-            _startCloudInternal();
-          }
-        });
+    if (!_isListening || !_usingCloudEngine) return;
+
+    final errorMsg = error.errorMsg.toLowerCase();
+    final isRecoverable = errorMsg.contains('no_match') ||
+        errorMsg.contains('error_speech_timeout') ||
+        errorMsg.contains('error_no_match') ||
+        errorMsg.contains('error_busy');
+
+    if (isRecoverable) {
+      debugPrint('🔄 Auto-restarting after $errorMsg...');
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (_isListening && _usingCloudEngine) {
+          _startCloudInternal();
+        }
+      });
+    } else if (error.permanent) {
+      // Permanent error — fall back to offline
+      debugPrint('❌ Permanent cloud error — falling back to offline');
+      if (_voskReady) {
+        _startDevice(onEngineChanged: _onEngineChanged);
       }
     }
   }
@@ -191,14 +224,7 @@ class TranscriptionService {
         onResult: (SpeechRecognitionResult r) {
           if (r.finalResult) {
             _onResult?.call(r.recognizedWords);
-            // Auto-restart after final result for continuous dictation
-            if (_isListening && _usingCloudEngine) {
-              Future.delayed(const Duration(milliseconds: 300), () {
-                if (_isListening && _usingCloudEngine) {
-                  _startCloudInternal();
-                }
-              });
-            }
+            // Auto-restart is handled by _handleCloudStatus('done')
           } else {
             _onPartial?.call(r.recognizedWords);
           }
@@ -207,8 +233,8 @@ class TranscriptionService {
         listenMode: ListenMode.dictation,
         partialResults: true,
         cancelOnError: false,
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: const Duration(seconds: 60),
+        pauseFor: const Duration(seconds: 5),
       );
 
       debugPrint('☁️ Whisper cloud listening (locale=$localeId)');
@@ -219,24 +245,41 @@ class TranscriptionService {
     }
   }
 
-  // ── On-device engine (always English model for Roman/Latin output) ──
+  // ── On-device engine ──
   Future<bool> _startDevice({Function(bool)? onEngineChanged}) async {
     try {
+      // Select model based on language
+      final useHindiModel = _currentLanguage == 'ur' && _voskModelHi != null;
+      final selectedModel = useHindiModel ? _voskModelHi! : _voskModelEn!;
+
+      // Create recognizer for selected model
+      _voskRecognizer = await _vosk!.createRecognizer(
+        model: selectedModel,
+        sampleRate: 16000,
+      );
+
       _voskSpeechService = await _vosk!.initSpeechService(_voskRecognizer!);
 
       _voskSpeechService!.onPartial().listen((json) {
         try {
           final data = jsonDecode(json) as Map<String, dynamic>;
-          final text = data['partial'] as String? ?? '';
-          if (text.isNotEmpty) _onPartial?.call(text);
+          String text = data['partial'] as String? ?? '';
+          if (text.isNotEmpty) {
+            // Transliterate Devanagari → Roman for Urdu users
+            if (useHindiModel) text = devanagariToRoman(text);
+            _onPartial?.call(text);
+          }
         } catch (_) {}
       });
 
       _voskSpeechService!.onResult().listen((json) {
         try {
           final data = jsonDecode(json) as Map<String, dynamic>;
-          final text = data['text'] as String? ?? '';
-          if (text.isNotEmpty) _onResult?.call(text);
+          String text = data['text'] as String? ?? '';
+          if (text.isNotEmpty) {
+            if (useHindiModel) text = devanagariToRoman(text);
+            _onResult?.call(text);
+          }
         } catch (_) {}
       });
 
@@ -244,7 +287,7 @@ class TranscriptionService {
       _isListening = true;
       _usingCloudEngine = false;
       onEngineChanged?.call(false);
-      debugPrint('📴 Whisper on-device listening');
+      debugPrint('📴 Whisper on-device listening (model=${useHindiModel ? "Hindi/Urdu" : "English"})');
       return true;
     } catch (e) {
       debugPrint('❌ On-device error: $e');
@@ -276,7 +319,8 @@ class TranscriptionService {
   void dispose() {
     stopListening();
     _voskRecognizer = null;
-    _voskModel = null;
+    _voskModelEn = null;
+    _voskModelHi = null;
     _vosk = null;
     _speechReady = false;
     _voskReady = false;

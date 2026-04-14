@@ -53,6 +53,7 @@ dependencies:
   # Local AI / data
   sqflite: ^2.4.1               # Local SQLite DB for conversation history
   connectivity_plus: ^7.0.0
+  audio_io: ^0.3.2              # Real-time mic → speaker streaming for live assist
 
 dev_dependencies:
   flutter_test:
@@ -109,3 +110,6 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+dependency_overrides:
+  web: ^1.0.0
