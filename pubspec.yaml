@@ -54,6 +54,7 @@ dependencies:
   sqflite: ^2.4.1               # Local SQLite DB for conversation history
   connectivity_plus: ^7.0.0
   audio_io: ^0.3.2              # Real-time mic → speaker streaming for live assist
+  tflite_flutter: ^0.12.0       # Upgraded for SDK compatibility
 
 dev_dependencies:
   flutter_test:

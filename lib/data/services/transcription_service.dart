@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:speech_to_text/speech_to_text.dart';
-import 'package:speech_to_text/speech_recognition_result.dart';
-import 'package:speech_to_text/speech_recognition_error.dart';
+import 'package:google_speech/google_speech.dart';
+import 'package:google_speech/generated/google/cloud/speech/v1/cloud_speech.pb.dart' as pb hide SpeechClient;
+import 'package:record/record.dart';
 import 'package:vosk_flutter_2/vosk_flutter_2.dart';
+import '../../core/constants/api_keys.dart';
 import '../utils/devanagari_to_roman.dart';
 
 /// Speech-to-text service powered by Whisper AI.
@@ -18,8 +19,10 @@ class TranscriptionService {
   factory TranscriptionService() => _instance;
   TranscriptionService._internal();
 
-  // ── Cloud engine ──
-  final SpeechToText _speech = SpeechToText();
+  // ── Cloud engine (Google Cloud STT) ──
+  late SpeechToText _googleSpeech;
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  StreamSubscription<pb.StreamingRecognizeResponse>? _audioStreamSubscription;
   bool _speechReady = false;
 
   // ── On-device engine ──
@@ -33,17 +36,22 @@ class TranscriptionService {
   // ── State ──
   bool _isListening = false;
   bool _usingCloudEngine = false;
+  bool _useExternalSource = false;
+  StreamController<List<int>>? _externalAudioController;
+  String _status = 'Idle'; 
 
   // ── Stored callbacks for auto-restart ──
   Function(String text)? _onPartial;
   Function(String text)? _onResult;
   Function(bool isOnline)? _onEngineChanged;
+  Function(String status)? _onStatusChanged;
   String _currentLanguage = 'en';
 
   /// Supported languages
   static const Map<String, String> supportedLanguages = {
     'en': 'English',
     'ur': 'Urdu',
+    'auto': 'Auto-Detect',
   };
 
   /// Locale IDs for cloud speech
@@ -58,13 +66,17 @@ class TranscriptionService {
 
   /// Initialize all engines.
   Future<bool> initialize() async {
-    // Init cloud speech with auto-restart on errors
+    // Init cloud speech (Direct Google API)
     try {
-      _speechReady = await _speech.initialize(
-        onError: _handleCloudError,
-        onStatus: _handleCloudStatus,
-      );
-      debugPrint(_speechReady ? '✅ Whisper cloud ready' : '⚠️ Cloud unavailable');
+      final jsonKey = ApiKeys.googleCloudServiceAccount.trim();
+      if (jsonKey.isNotEmpty && !jsonKey.contains('PASTE YOUR')) {
+        _googleSpeech = SpeechToText.viaServiceAccount(ServiceAccount.fromString(jsonKey));
+        _speechReady = true;
+        debugPrint('✅ Google Cloud STT ready');
+      } else {
+        debugPrint('⚠️ Google Cloud STT: No Service Account JSON provided yet.');
+        _speechReady = false;
+      }
     } catch (e) {
       debugPrint('⚠️ Cloud init error: $e');
       _speechReady = false;
@@ -80,7 +92,7 @@ class TranscriptionService {
           .loadFromAssets('assets/models/vosk-model-small-en-us-0.15.zip');
       _voskModelEn = await _vosk!.createModel(enPath);
 
-      // Hindi model (for Urdu — output will be transliterated to Roman)
+      // Hindi model (for Urdu)
       try {
         final hiPath = await ModelLoader()
             .loadFromAssets('assets/models/vosk-model-small-hi-0.22.zip');
@@ -90,12 +102,17 @@ class TranscriptionService {
         debugPrint('⚠️ Hindi model not available: $e');
       }
 
-      _voskRecognizer = await _vosk!.createRecognizer(
-        model: _voskModelEn!,
-        sampleRate: 16000,
-      );
-      _voskReady = true;
-      debugPrint('✅ Whisper on-device ready');
+      if (_voskModelEn != null) {
+        _voskRecognizer = await _vosk!.createRecognizer(
+          model: _voskModelEn!,
+          sampleRate: 16000,
+        );
+        _voskReady = true;
+        debugPrint('✅ Whisper on-device ready');
+      } else {
+        debugPrint('⚠️ English model failed to create');
+        _voskReady = false;
+      }
     } catch (e) {
       debugPrint('⚠️ On-device init error: $e');
       _voskReady = false;
@@ -104,50 +121,7 @@ class TranscriptionService {
     return isReady;
   }
 
-  /// Handle cloud speech status — auto-restart when session ends
-  void _handleCloudStatus(String status) {
-    debugPrint('☁️ Status: $status');
-
-    // When the session finishes ("done" / "notListening"), auto-restart
-    if ((status == 'done' || status == 'notListening') &&
-        _isListening &&
-        _usingCloudEngine) {
-      debugPrint('🔄 Session ended ($status) — auto-restarting...');
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (_isListening && _usingCloudEngine) {
-          _startCloudInternal();
-        }
-      });
-    }
-  }
-
-  /// Handle cloud speech errors — auto-restart on recoverable errors
-  void _handleCloudError(SpeechRecognitionError error) {
-    debugPrint('☁️ Error: ${error.errorMsg} (permanent: ${error.permanent})');
-
-    if (!_isListening || !_usingCloudEngine) return;
-
-    final errorMsg = error.errorMsg.toLowerCase();
-    final isRecoverable = errorMsg.contains('no_match') ||
-        errorMsg.contains('error_speech_timeout') ||
-        errorMsg.contains('error_no_match') ||
-        errorMsg.contains('error_busy');
-
-    if (isRecoverable) {
-      debugPrint('🔄 Auto-restarting after $errorMsg...');
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (_isListening && _usingCloudEngine) {
-          _startCloudInternal();
-        }
-      });
-    } else if (error.permanent) {
-      // Permanent error — fall back to offline
-      debugPrint('❌ Permanent cloud error — falling back to offline');
-      if (_voskReady) {
-        _startDevice(onEngineChanged: _onEngineChanged);
-      }
-    }
-  }
+  // Handlers for cloud status/error are now integrated into the streaming logic
 
   Future<bool> _hasInternet() async {
     try {
@@ -166,11 +140,16 @@ class TranscriptionService {
     required Function(String text) onPartial,
     required Function(String text) onResult,
     Function(bool isOnline)? onEngineChanged,
+    Function(String status)? onStatusChanged,
     String language = 'en',
+    bool useExternalSource = false,
   }) async {
     if (!isReady) {
       final ok = await initialize();
-      if (!ok) return false;
+      if (!ok) {
+        onStatusChanged?.call('Error: Plugin not ready');
+        return false;
+      }
     }
 
     if (_isListening) await stopListening();
@@ -179,7 +158,15 @@ class TranscriptionService {
     _onPartial = onPartial;
     _onResult = onResult;
     _onEngineChanged = onEngineChanged;
+    _onStatusChanged = onStatusChanged;
     _currentLanguage = language;
+    _useExternalSource = useExternalSource;
+
+    onStatusChanged?.call('Connecting...');
+
+    if (_useExternalSource) {
+      _externalAudioController = StreamController<List<int>>.broadcast();
+    }
 
     final online = await _hasInternet();
 
@@ -200,9 +187,11 @@ class TranscriptionService {
       _isListening = true;
       _usingCloudEngine = true;
       onEngineChanged?.call(true);
+      _onStatusChanged?.call('Online');
       return await _startCloudInternal();
     } catch (e) {
-      debugPrint('❌ Cloud error: $e — falling back to device');
+      debugPrint('❌ Cloud STT failed: $e');
+      _onStatusChanged?.call('Offline (Auto-switching)');
       if (_voskReady) {
         return _startDevice(onEngineChanged: onEngineChanged);
       }
@@ -210,38 +199,89 @@ class TranscriptionService {
     }
   }
 
-  /// Internal method to start/restart the cloud listener
+  /// Internal method to start/restart the cloud listener using streaming API
   Future<bool> _startCloudInternal() async {
     try {
-      if (_speech.isListening) {
-        await _speech.stop();
-        await Future.delayed(const Duration(milliseconds: 100));
-      }
+      await _stopCloudStreaming();
 
-      final localeId = _cloudLocales[_currentLanguage] ?? 'en_US';
+      final isAuto = _currentLanguage == 'auto';
+      final localeId = isAuto ? 'en-US' : (_cloudLocales[_currentLanguage] ?? 'en_US');
+      final alternativeLocales = isAuto ? ['ur-PK'] : <String>[];
 
-      await _speech.listen(
-        onResult: (SpeechRecognitionResult r) {
-          if (r.finalResult) {
-            _onResult?.call(r.recognizedWords);
-            // Auto-restart is handled by _handleCloudStatus('done')
-          } else {
-            _onPartial?.call(r.recognizedWords);
-          }
-        },
-        localeId: localeId,
-        listenMode: ListenMode.dictation,
-        partialResults: true,
-        cancelOnError: false,
-        listenFor: const Duration(seconds: 60),
-        pauseFor: const Duration(seconds: 5),
+      // 1. Configure STT
+      final config = RecognitionConfig(
+        encoding: AudioEncoding.LINEAR16,
+        model: RecognitionModel.basic,
+        enableAutomaticPunctuation: true,
+        sampleRateHertz: 16000,
+        languageCode: localeId,
       );
 
-      debugPrint('☁️ Whisper cloud listening (locale=$localeId)');
+      final streamingConfig = StreamingRecognitionConfig(
+        config: config,
+        interimResults: true,
+      );
+
+      // 2. Start Microphone Stream (OR use external)
+      late Stream<List<int>> audioStream;
+
+      if (_useExternalSource && _externalAudioController != null) {
+        audioStream = _externalAudioController!.stream;
+      } else {
+        const recordConfig = RecordConfig(
+          encoder: AudioEncoder.pcm16bits,
+          sampleRate: 16000,
+          numChannels: 1,
+        );
+        audioStream = await _audioRecorder.startStream(recordConfig);
+      }
+
+      // 3. Connect to Google Cloud STT
+      final responseStream = _googleSpeech.streamingRecognize(
+        streamingConfig,
+        audioStream,
+      );
+
+      _audioStreamSubscription = responseStream.listen(
+        (data) {
+          final transcript = data.results
+              .map((it) => it.alternatives.first.transcript)
+              .join(' ');
+
+          if (data.results.first.isFinal) {
+            _onResult?.call(transcript);
+          } else {
+            _onPartial?.call(transcript);
+          }
+        },
+        onError: (e) {
+          debugPrint('❌ Cloud streaming error: $e');
+          if (_isListening && _voskReady) {
+            _startDevice(onEngineChanged: _onEngineChanged);
+          }
+        },
+        onDone: () {
+          debugPrint('☁️ Cloud session finished');
+          // If we are still supposed to be listening, restart the stream
+          if (_isListening && _usingCloudEngine) {
+            Future.delayed(const Duration(milliseconds: 500), _startCloudInternal);
+          }
+        },
+      );
+
+      debugPrint('☁️ Google Cloud listening (locale=$localeId)');
       return true;
     } catch (e) {
       debugPrint('❌ Cloud listen error: $e');
       return false;
+    }
+  }
+
+  Future<void> _stopCloudStreaming() async {
+    await _audioStreamSubscription?.cancel();
+    _audioStreamSubscription = null;
+    if (await _audioRecorder.isRecording()) {
+      await _audioRecorder.stop();
     }
   }
 
@@ -283,14 +323,18 @@ class TranscriptionService {
         } catch (_) {}
       });
 
-      await _voskSpeechService!.start();
+      if (!_useExternalSource) {
+        await _voskSpeechService!.start();
+      }
       _isListening = true;
       _usingCloudEngine = false;
       onEngineChanged?.call(false);
+      _onStatusChanged?.call('Local (Offline)');
       debugPrint('📴 Whisper on-device listening (model=${useHindiModel ? "Hindi/Urdu" : "English"})');
       return true;
     } catch (e) {
-      debugPrint('❌ On-device error: $e');
+      debugPrint('❌ On-device STT failed: $e');
+      _onStatusChanged?.call('Error: Engine failed');
       return false;
     }
   }
@@ -300,7 +344,7 @@ class TranscriptionService {
     _isListening = false;  // Set first to prevent auto-restart
 
     if (_usingCloudEngine) {
-      if (_speech.isListening) await _speech.stop();
+      await _stopCloudStreaming();
     } else {
       if (_voskSpeechService != null) {
         try {
@@ -314,6 +358,21 @@ class TranscriptionService {
     _onPartial = null;
     _onResult = null;
     _onEngineChanged = null;
+
+    await _externalAudioController?.close();
+    _externalAudioController = null;
+  }
+
+  /// Inject audio data from external source (e.g. LiveAssistScreen)
+  void feedAudioBytes(List<int> bytes) {
+    if (!_isListening || !_useExternalSource) return;
+
+    if (_usingCloudEngine) {
+      _externalAudioController?.add(bytes);
+    } else {
+      // On-device (Vosk)
+      _voskRecognizer?.acceptWaveformBytes(Uint8List.fromList(bytes));
+    }
   }
 
   void dispose() {

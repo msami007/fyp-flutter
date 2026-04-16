@@ -22,6 +22,7 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
   Timer? _timer;
   String _selectedLang = 'en';
   String _statusMessage = 'Loading Whisper models...';
+  bool _isUsingOnlineEngine = false;
 
   @override
   void initState() {
@@ -68,6 +69,9 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
 
     final ok = await _transcription.startListening(
       language: _selectedLang,
+      onEngineChanged: (isOnline) {
+        if (mounted) setState(() => _isUsingOnlineEngine = isOnline);
+      },
       onPartial: (text) {
         if (mounted) setState(() => _currentPartial = text);
       },
@@ -217,22 +221,29 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
                         },
                       ),
                     ),
-                  // Whisper badge when listening
+                  // Engine indicator
                   if (_isListening)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF6C63FF).withOpacity(0.15),
+                        color: _isUsingOnlineEngine 
+                            ? Colors.green.withOpacity(0.15) 
+                            : Colors.orange.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.auto_awesome, size: 14, color: Color(0xFF6C63FF)),
-                          SizedBox(width: 4),
-                          Text('WHISPER AI',
+                          Icon(
+                            _isUsingOnlineEngine ? Icons.cloud_done_rounded : Icons.offline_bolt_rounded, 
+                            size: 14, 
+                            color: _isUsingOnlineEngine ? Colors.green : Colors.orange
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _isUsingOnlineEngine ? 'GOOGLE CLOUD' : 'OFFLINE VOSK',
                             style: TextStyle(
-                              color: Color(0xFF6C63FF),
+                              color: _isUsingOnlineEngine ? Colors.green : Colors.orange,
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                             ),

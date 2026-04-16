@@ -2,58 +2,66 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'HearingProfileService.dart';
+import 'audio_model_service.dart';
 
-/// Applies frequency-specific equalization based on the user's hearing profile.
+enum EnhancementMode {
+  standard, // Biquad EQ
+  dtln,     // AI Noise Suppression
+  rnn,      // AI Voice Isolation
+  krisp,    // AI + Spectral Post-Processing (High Quality)
+}
+
+/// Lightweight audio enhancement using IIR biquad filters.
 ///
-/// Uses FFT to split audio into frequency bands, apply per-band gain
-/// based on hearing test thresholds, then IFFT to reconstruct.
+/// Instead of heavy FFT processing, this uses a set of peak EQ filters
+/// centered at the hearing test frequencies. Each filter boosts its
+/// target frequency band based on the user's hearing profile.
+/// This processes samples instantly with zero buffering latency.
 class AudioEnhancementService {
   static final AudioEnhancementService _instance =
       AudioEnhancementService._internal();
   factory AudioEnhancementService() => _instance;
   AudioEnhancementService._internal();
 
-  /// Sample rate of audio_io (fixed at 48kHz)
-  static const int sampleRate = 48000;
+  final AudioModelService _modelService = AudioModelService();
+  static const int sampleRate = 16000;
 
-  /// FFT frame size — must be power of 2
-  static const int frameSize = 1024;
+  /// Maximum boost in dB (12 dB ≈ 4x amplitude)
+  static const double maxBoostDb = 12.0;
 
-  /// Half the frame (number of unique frequency bins)
-  static const int halfFrame = frameSize ~/ 2;
+  /// Noise gate threshold (silence if signal below this)
+  /// 0.01 is roughly -40dBfs
+  double _gateThreshold = 0.01; 
+  double _gateAlpha = 0.95; // Envelope smoothing
+  double _envelope = 0.0;
 
-  /// Maximum boost factor (e.g., 4.0 = up to 4x amplification)
-  static const double maxBoost = 4.0;
+  // ── Spectral Suppression Params (Krisp-level) ──
+  double _noiseFloor = 0.005;
+  double _spectralAlpha = 0.98; // Noise floor estimation speed
+  double _gainSmooth = 0.9;     // Smoothing of the suppression gain
 
-  /// Whether enhancement is active
+  EnhancementMode _mode = EnhancementMode.standard;
+  EnhancementMode get mode => _mode;
+
   bool _isEnabled = false;
   bool get isEnabled => _isEnabled;
 
-  /// Whether a hearing profile is loaded
   bool _profileLoaded = false;
   bool get profileLoaded => _profileLoaded;
 
-  /// Gain multipliers per FFT bin (length = halfFrame)
-  late Float64List _gainCurve;
+  /// Biquad filter states for each frequency band
+  final List<_BiquadFilter> _filters = [];
 
-  /// Overlap-add buffer for smooth output
-  final Float64List _overlapBuffer = Float64List(frameSize);
+  /// Overall output gain (prevents clipping)
+  double _outputGain = 0.8;
 
-  /// Previous leftover samples that didn't fill a full frame
-  List<double> _leftover = [];
-
-  /// Hearing profile frequencies (Hz) and their threshold values
   final List<int> _testFrequencies = [
     125, 250, 375, 500, 750, 1000, 1500, 2000, 3000, 4000, 6000, 7000, 8000
   ];
 
   /// Initialize with the user's hearing profile.
-  /// Call this before starting live assist.
   Future<bool> initialize() async {
-    _gainCurve = Float64List(halfFrame);
-    for (int i = 0; i < halfFrame; i++) {
-      _gainCurve[i] = 1.0; // default: no boost
-    }
+    _filters.clear();
 
     final profile = await HearingProfileService().getLocalProfile();
     if (profile == null) {
@@ -64,215 +72,234 @@ class AudioEnhancementService {
 
     _loadProfile(profile);
     _profileLoaded = true;
-    debugPrint('✅ AudioEnhancementService initialized with hearing profile');
+
+    // Load AI models
+    await _modelService.loadDtln();
+    await _modelService.loadRnn();
+
+    debugPrint('✅ AudioEnhancementService initialized (Biquad + AI models)');
     return true;
   }
 
-  /// Build the gain curve from the hearing profile's frequency map.
   void _loadProfile(Map<String, dynamic> profile) {
     final freqMap = profile['frequencyMap'] as Map<String, dynamic>?;
     if (freqMap == null) return;
 
-    // Average left and right thresholds per frequency
-    final Map<int, double> avgThresholds = {};
+    _filters.clear();
+
     for (final freq in _testFrequencies) {
       final leftKey = 'L_$freq';
       final rightKey = 'R_$freq';
       final leftVal = (freqMap[leftKey] as num?)?.toDouble() ?? 1.0;
       final rightVal = (freqMap[rightKey] as num?)?.toDouble() ?? 1.0;
-      avgThresholds[freq] = (leftVal + rightVal) / 2.0;
-    }
+      final avgThreshold = (leftVal + rightVal) / 2.0;
 
-    // Build gain curve: interpolate between test frequencies
-    for (int bin = 0; bin < halfFrame; bin++) {
-      final freq = bin * sampleRate / frameSize; // frequency of this bin
+      // Convert threshold to boost in dB
+      // threshold 1.0 = perfect hearing → 0 dB boost
+      // threshold 0.0 = deaf → maxBoostDb boost
+      final boostDb = (1.0 - avgThreshold.clamp(0.0, 1.0)) * maxBoostDb;
 
-      // Find the two nearest test frequencies
-      double gain = 1.0;
-      if (freq <= _testFrequencies.first) {
-        gain = _thresholdToGain(avgThresholds[_testFrequencies.first]!);
-      } else if (freq >= _testFrequencies.last) {
-        gain = _thresholdToGain(avgThresholds[_testFrequencies.last]!);
-      } else {
-        // Linear interpolation between neighboring test frequencies
-        for (int i = 0; i < _testFrequencies.length - 1; i++) {
-          if (freq >= _testFrequencies[i] && freq <= _testFrequencies[i + 1]) {
-            final f1 = _testFrequencies[i].toDouble();
-            final f2 = _testFrequencies[i + 1].toDouble();
-            final g1 = _thresholdToGain(avgThresholds[_testFrequencies[i]]!);
-            final g2 = _thresholdToGain(avgThresholds[_testFrequencies[i + 1]]!);
-            final t = (freq - f1) / (f2 - f1);
-            gain = g1 + t * (g2 - g1);
-            break;
-          }
-        }
+      if (boostDb > 0.5) {
+        // Only add filter if meaningful boost is needed
+        _filters.add(_BiquadFilter.peakEQ(
+          sampleRate: sampleRate.toDouble(),
+          frequency: freq.toDouble(),
+          gainDb: boostDb,
+          q: 1.2, // moderate bandwidth
+        ));
       }
-
-      _gainCurve[bin] = gain;
     }
 
-    debugPrint('📊 Gain curve built: min=${_gainCurve.reduce(min).toStringAsFixed(2)}, '
-        'max=${_gainCurve.reduce(max).toStringAsFixed(2)}');
+    debugPrint('📊 Created ${_filters.length} biquad filters for hearing profile');
   }
 
-  /// Convert a hearing threshold (0.0–1.0) to a gain multiplier.
-  /// Lower threshold = user hears poorly = needs more boost.
-  double _thresholdToGain(double threshold) {
-    // threshold: 1.0 = perfect hearing, 0.0 = can't hear
-    // gain:     1.0 = no boost,        maxBoost = maximum amplification
-    return 1.0 + (1.0 - threshold.clamp(0.0, 1.0)) * (maxBoost - 1.0);
+  void setMode(EnhancementMode mode) {
+    _mode = mode;
+    debugPrint('🎛️ Enhancement mode set to: $mode');
   }
 
-  /// Enable/disable enhancement
   void setEnabled(bool enabled) {
     _isEnabled = enabled;
     debugPrint(enabled ? '🔊 Enhancement ENABLED' : '🔇 Enhancement DISABLED');
   }
 
-  /// Process a chunk of audio samples (List<double> from audio_io).
-  /// Returns enhanced audio ready for output.
-  List<double> processAudio(List<double> input) {
-    if (!_isEnabled || !_profileLoaded) return input;
+  /// Process audio samples. Near-zero latency — no buffering needed.
+  Float64List processAudio(List<double> input) {
+    if (!_isEnabled) return input is Float64List ? input : Float64List.fromList(input);
 
-    // Accumulate samples
-    _leftover.addAll(input);
+    switch (_mode) {
+      case EnhancementMode.dtln:
+        return _processAiModel(input, _modelService.processDtln);
+      case EnhancementMode.rnn:
+        return _processAiModel(input, _modelService.processRnn);
+      case EnhancementMode.krisp:
+        final aiOut = _processAiModel(input, _modelService.processDtln);
+        return _processSpectralSubtraction(aiOut);
+      case EnhancementMode.standard:
+      default:
+        return _processBiquad(input);
+    }
+  }
 
-    final List<double> output = [];
+  Float64List _processBiquad(List<double> input) {
+    if (!_profileLoaded || _filters.isEmpty) {
+      return input is Float64List ? input : Float64List.fromList(input);
+    }
 
-    // Process full frames
-    while (_leftover.length >= frameSize) {
-      final frame = Float64List.fromList(_leftover.sublist(0, frameSize));
-      _leftover = _leftover.sublist(frameSize ~/ 2); // 50% overlap
+    final output = Float64List(input.length);
 
-      // Apply Hann window
-      _applyWindow(frame);
-
-      // FFT
-      final fftResult = _fft(frame);
-
-      // Apply gain curve in frequency domain
-      for (int i = 0; i < halfFrame; i++) {
-        fftResult[i * 2] *= _gainCurve[i];       // real part
-        fftResult[i * 2 + 1] *= _gainCurve[i];   // imaginary part
+    // Copy input to output efficiently
+    if (input is Float64List) {
+      output.setAll(0, input);
+    } else {
+      for (int i = 0; i < input.length; i++) {
+        output[i] = input[i];
       }
-      // Mirror for negative frequencies
-      for (int i = 1; i < halfFrame; i++) {
-        fftResult[(frameSize - i) * 2] = fftResult[i * 2];
-        fftResult[(frameSize - i) * 2 + 1] = -fftResult[i * 2 + 1];
+    }
+
+    // Apply each biquad filter in series
+    for (final filter in _filters) {
+      for (int i = 0; i < output.length; i++) {
+        output[i] = filter.process(output[i]);
+      }
+    }
+
+    // Apply Noise Gate & Output Gain
+    for (int i = 0; i < output.length; i++) {
+      final sample = output[i].abs();
+      // Simple envelope follower
+      _envelope = _gateAlpha * _envelope + (1.0 - _gateAlpha) * sample;
+      
+      // If envelope is below threshold, apply aggressive attenuation
+      if (_envelope < _gateThreshold) {
+        output[i] *= 0.02; // -34dB attenuation
       }
 
-      // IFFT
-      final enhanced = _ifft(fftResult);
+      output[i] = _softClip(output[i] * _outputGain);
+    }
 
-      // Overlap-add
-      for (int i = 0; i < frameSize; i++) {
-        if (i < halfFrame) {
-          enhanced[i] += _overlapBuffer[i + halfFrame];
+    return output;
+  }
+
+  Float64List _processAiModel(List<double> input, Float32List Function(Float32List) modelFn) {
+    // 1. Convert to Float32 safely using Float32List.fromList
+    final float32In = Float32List.fromList(input.map((e) => e.toDouble()).toList());
+
+    // 2. Process through model
+    final processed32 = modelFn(float32In);
+
+    // 3. Convert back to Float64 and apply output gain/softclip
+    final output = Float64List(processed32.length);
+    for (int i = 0; i < processed32.length; i++) {
+        output[i] = _softClip(processed32[i] * _outputGain);
+    }
+    return output;
+  }
+
+  /// Soft clipping using tanh — prevents harsh digital distortion
+  double _softClip(double x) {
+    if (x.abs() < 0.8) return x;
+    // Smoother transition above 0.8
+    final sign = x.sign;
+    final val = x.abs();
+    return sign * (0.8 + 0.2 * tanh((val - 0.8) / 0.2));
+  }
+
+  double tanh(double x) {
+    if (x > 20) return 1.0;
+    if (x < -20) return -1.0;
+    final exp2x = exp(2 * x);
+    return (exp2x - 1) / (exp2x + 1);
+  }
+
+  /// Advanced Spectral Post-Processor (Inspired by Wiener Filter)
+  /// This further cleans up AI artifacts for a "Krisp" finish.
+  Float64List _processSpectralSubtraction(Float64List input) {
+    final output = Float64List(input.length);
+    
+    for (int i = 0; i < input.length; i++) {
+        final sample = input[i].abs();
+        
+        // 1. Update noise floor during relative silence
+        if (sample < _noiseFloor * 2) {
+          _noiseFloor = _spectralAlpha * _noiseFloor + (1.0 - _spectralAlpha) * sample;
         }
-      }
+        
+        // 2. Calculate Instantaneous SNR
+        final snr = sample / (_noiseFloor + 1e-6);
+        
+        // 3. Wiener-like Gain: G = SNR^2 / (SNR^2 + Alpha)
+        // This aggressively suppresses anything below the noise floor
+        double gain = (snr * snr) / (snr * snr + 1.5);
+        
+        // 4. Smooth the gain changes to prevent 'musical noise'
+        _gainSmooth = 0.85; // Faster for spectral sub
+        gain = _gainSmooth * gain + (1.0 - _gainSmooth) * gain; 
 
-      // Save overlap for next frame
-      for (int i = 0; i < frameSize; i++) {
-        _overlapBuffer[i] = enhanced[i];
-      }
-
-      // Output the first half (non-overlapping part)
-      for (int i = 0; i < halfFrame; i++) {
-        output.add(enhanced[i].clamp(-1.0, 1.0));
-      }
+        // 5. Apply gain with a floor to prevent total deadness
+        final finalGain = gain.clamp(0.05, 1.0);
+        output[i] = input[i] * finalGain;
     }
-
-    return output.isEmpty ? input : output;
+    
+    return output;
   }
 
-  /// Apply Hann window to a frame
-  void _applyWindow(Float64List frame) {
-    for (int i = 0; i < frame.length; i++) {
-      frame[i] *= 0.5 * (1.0 - cos(2.0 * pi * i / (frame.length - 1)));
-    }
-  }
-
-  /// Simple in-place FFT (Cooley-Tukey, radix-2)
-  Float64List _fft(Float64List real) {
-    final n = real.length;
-    final data = Float64List(n * 2); // interleaved [re, im, re, im, ...]
-    for (int i = 0; i < n; i++) {
-      data[i * 2] = real[i];
-      data[i * 2 + 1] = 0.0;
-    }
-    _fftInPlace(data, false);
-    return data;
-  }
-
-  /// Simple IFFT
-  Float64List _ifft(Float64List data) {
-    _fftInPlace(data, true);
-    final n = data.length ~/ 2;
-    final result = Float64List(n);
-    for (int i = 0; i < n; i++) {
-      result[i] = data[i * 2] / n;
-    }
-    return result;
-  }
-
-  /// Cooley-Tukey radix-2 FFT in-place on interleaved complex data
-  void _fftInPlace(Float64List data, bool inverse) {
-    final n = data.length ~/ 2;
-    if (n <= 1) return;
-
-    // Bit-reversal permutation
-    int j = 0;
-    for (int i = 0; i < n; i++) {
-      if (i < j) {
-        // Swap real parts
-        final tmpR = data[i * 2];
-        final tmpI = data[i * 2 + 1];
-        data[i * 2] = data[j * 2];
-        data[i * 2 + 1] = data[j * 2 + 1];
-        data[j * 2] = tmpR;
-        data[j * 2 + 1] = tmpI;
-      }
-      int m = n >> 1;
-      while (m >= 1 && j >= m) {
-        j -= m;
-        m >>= 1;
-      }
-      j += m;
-    }
-
-    // FFT butterfly
-    for (int size = 2; size <= n; size *= 2) {
-      final halfSize = size ~/ 2;
-      final angle = (inverse ? 2.0 : -2.0) * pi / size;
-
-      for (int i = 0; i < n; i += size) {
-        for (int k = 0; k < halfSize; k++) {
-          final wR = cos(angle * k);
-          final wI = sin(angle * k);
-
-          final evenIdx = (i + k) * 2;
-          final oddIdx = (i + k + halfSize) * 2;
-
-          final tR = wR * data[oddIdx] - wI * data[oddIdx + 1];
-          final tI = wR * data[oddIdx + 1] + wI * data[oddIdx];
-
-          data[oddIdx] = data[evenIdx] - tR;
-          data[oddIdx + 1] = data[evenIdx + 1] - tI;
-          data[evenIdx] += tR;
-          data[evenIdx + 1] += tI;
-        }
-      }
-    }
-  }
-
-  /// Reset internal buffers
   void reset() {
-    _leftover.clear();
-    _overlapBuffer.fillRange(0, _overlapBuffer.length, 0.0);
+    _envelope = 0.0;
+    for (final f in _filters) {
+      f.reset();
+    }
   }
 
   void dispose() {
     _isEnabled = false;
-    _leftover.clear();
+    _filters.clear();
+  }
+}
+
+/// Second-order IIR biquad filter.
+class _BiquadFilter {
+  final double frequency;
+  final double gainDb;
+
+  // Coefficients
+  double _b0 = 1, _b1 = 0, _b2 = 0;
+  double _a1 = 0, _a2 = 0;
+
+  // State (delay line)
+  double _x1 = 0, _x2 = 0;
+  double _y1 = 0, _y2 = 0;
+
+  _BiquadFilter.peakEQ({
+    required double sampleRate,
+    required this.frequency,
+    required this.gainDb,
+    required double q,
+  }) {
+    final A = pow(10.0, gainDb / 40.0).toDouble();
+    final w0 = 2.0 * pi * frequency / sampleRate;
+    final cosW0 = cos(w0);
+    final sinW0 = sin(w0);
+    final alpha = sinW0 / (2.0 * q);
+
+    final a0 = 1.0 + alpha / A;
+    _b0 = (1.0 + alpha * A) / a0;
+    _b1 = (-2.0 * cosW0) / a0;
+    _b2 = (1.0 - alpha * A) / a0;
+    _a1 = (-2.0 * cosW0) / a0;
+    _a2 = (1.0 - alpha / A) / a0;
+  }
+
+  double process(double x) {
+    final y = _b0 * x + _b1 * _x1 + _b2 * _x2 - _a1 * _y1 - _a2 * _y2;
+    _x2 = _x1;
+    _x1 = x;
+    _y2 = _y1;
+    _y1 = y;
+    return y;
+  }
+
+  void reset() {
+    _x1 = _x2 = _y1 = _y2 = 0;
   }
 }

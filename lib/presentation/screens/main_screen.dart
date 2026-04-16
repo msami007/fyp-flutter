@@ -3,7 +3,6 @@ import 'home_screen.dart';
 import 'live_assist_screen.dart';
 import 'connect_device_screen.dart';
 import 'menu_screen.dart';
-import 'transcription_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -19,7 +18,6 @@ class _MainScreenState extends State<MainScreen> {
     HomeScreen(),
     LiveAssistScreen(),
     ConnectDeviceScreen(),
-    TranscriptionScreen(),
     MenuScreen(),
   ];
 
@@ -39,7 +37,7 @@ class _MainScreenState extends State<MainScreen> {
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(
-          margin: EdgeInsets.only(
+          margin: const EdgeInsets.only(
             left: 16,
             right: 16,
             bottom: 8,
@@ -85,16 +83,10 @@ class _MainScreenState extends State<MainScreen> {
                   index: 2,
                 ),
                 _buildNavItem(
-                  icon: Icons.transcribe_outlined,
-                  activeIcon: Icons.transcribe_rounded,
-                  label: 'Transcribe',
-                  index: 3,
-                ),
-                _buildNavItem(
                   icon: Icons.person_outline_rounded,
                   activeIcon: Icons.person_rounded,
                   label: 'Profile',
-                  index: 4,
+                  index: 3,
                 ),
               ],
             ),
@@ -119,7 +111,7 @@ class _MainScreenState extends State<MainScreen> {
           onTap: () => _onItemTapped(index),
           borderRadius: BorderRadius.circular(16),
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4), // Reduced horizontal padding
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
             decoration: BoxDecoration(
               color: isSelected ? const Color(0xFF6C63FF).withOpacity(0.2) : Colors.transparent,
               borderRadius: BorderRadius.circular(16),
@@ -140,7 +132,7 @@ class _MainScreenState extends State<MainScreen> {
                 Text(
                   label,
                   style: TextStyle(
-                    fontSize: 10, // Slightly smaller to fit 4 items
+                    fontSize: 10,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                     color: isSelected ? const Color(0xFF6C63FF) : Colors.white.withOpacity(0.6),
                   ),

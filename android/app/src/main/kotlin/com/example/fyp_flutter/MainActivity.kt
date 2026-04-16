@@ -44,19 +44,24 @@ class MainActivity : FlutterActivity() {
                     try {
                         val am = audioManager!!
 
-                        // Set audio mode to voice communication — this:
-                        // 1. Routes audio through earpiece/headset instead of speaker
-                        // 2. Enables hardware AEC and NS on the mic input
-                        // 3. Activates Bluetooth SCO if BT headset is connected
-                        am.mode = AudioManager.MODE_IN_COMMUNICATION
+                        // Check for Hearing Aid (ASHA/HAP)
+                        val outDevices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                        val isHearingAid = outDevices.any { it.type == AudioDeviceInfo.TYPE_HEARING_AID }
 
-                        // Enable speakerphone OFF to force headset routing
-                        am.isSpeakerphoneOn = false
+                        if (isHearingAid) {
+                            // ASHA devices: Use normal mode + direct routing (Phone Mic Required)
+                            am.mode = AudioManager.MODE_NORMAL
+                        } else {
+                            // Standard: Use Communication mode for AEC/NS
+                            am.mode = AudioManager.MODE_IN_COMMUNICATION
+                            am.isSpeakerphoneOn = false
 
-                        // If Bluetooth headset is connected, start SCO to use its mic
-                        if (hasBluetoothDevice(am)) {
-                            am.startBluetoothSco()
-                            am.isBluetoothScoOn = true
+                            if (hasBluetoothDevice(am)) {
+                                if (am.isBluetoothScoAvailableOffCall) {
+                                    am.startBluetoothSco()
+                                    am.isBluetoothScoOn = true
+                                }
+                            }
                         }
 
                         result.success(true)
