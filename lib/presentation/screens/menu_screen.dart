@@ -4,6 +4,9 @@ import '../../data/services/HearingProfileService.dart';
 import 'hearing_test_screen.dart';
 import 'hearing_result_screen.dart';
 import 'profile_account_screen.dart';
+import 'transcription_screen.dart';
+import 'conversation_history_screen.dart';
+import 'connect_device_screen.dart';
 import '../../routes/app_routes.dart';
 
 class MenuScreen extends StatefulWidget {
@@ -107,6 +110,27 @@ class _MenuScreenState extends State<MenuScreen> {
             title: const Text('Take Hearing Profile Again', style: TextStyle(color: Colors.white)),
             subtitle: const Text('Re-run the hearing test', style: TextStyle(color: Colors.white70)),
             onTap: _takeHearingProfileAgain,
+          ),
+          const Divider(color: Colors.white10),
+          ListTile(
+            leading: const Icon(Icons.subtitles_outlined, color: Colors.white),
+            title: const Text('Live Caption', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Start real-time transcription', style: TextStyle(color: Colors.white70)),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TranscriptionScreen())),
+          ),
+          const Divider(color: Colors.white10),
+          ListTile(
+            leading: const Icon(Icons.history_rounded, color: Colors.white),
+            title: const Text('Conversation History', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('View saved transcripts', style: TextStyle(color: Colors.white70)),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ConversationHistoryScreen())),
+          ),
+          const Divider(color: Colors.white10),
+          ListTile(
+            leading: const Icon(Icons.bluetooth_rounded, color: Colors.white),
+            title: const Text('Connect Devices', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Pair hearing aids or earbuds', style: TextStyle(color: Colors.white70)),
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ConnectDeviceScreen())),
           ),
           const Divider(color: Colors.white10),
           

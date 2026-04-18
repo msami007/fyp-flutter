@@ -7,7 +7,6 @@ import 'package:audio_io/audio_io.dart';
 import 'package:audio_session/audio_session.dart';
 import '../../data/services/audio_enhancement_service.dart';
 import '../../data/services/HearingProfileService.dart';
-import '../../data/services/transcription_service.dart';
 
 class LiveAssistScreen extends StatefulWidget {
   const LiveAssistScreen({super.key});
@@ -21,7 +20,6 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
   static const _audioChannel = MethodChannel('com.fyp_flutter/audio_route');
 
   final AudioEnhancementService _enhancement = AudioEnhancementService();
-  final TranscriptionService _transcription = TranscriptionService();
   late AudioIo _audioIo;
   StreamSubscription? _audioSub;
   StreamSubscription<Set<AudioDevice>>? _devicesSub;
@@ -40,10 +38,12 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
   int _lastChunkSize = 0;
   bool _isHearingAid = false; // ASHA/HAP support
   bool _useEarbudMic = true; // Use BT Mic if available
-  bool _captionOn = false;
-  String _transcript = 'Live captions will appear here...';
-  String _captionStatus = 'Idle';
-  String _captionLang = 'en'; // 'en' or 'ur'
+  double _leftBoost = 1.0;
+  double _rightBoost = 1.0;
+  double _tone = 0.5;
+  double _suppressionLevel = 0.5;
+  bool _linkEars = true;
+
 
   late AnimationController _pulseController;
 
@@ -127,88 +127,138 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
 
   Future<void> _startAssist() async {
     try {
-      // Enable hardware AEC + NS and route mic through BT headset
+      // Use 'voiceChat' mode for hardware-level suppression
+      await AudioSession.instance.then((session) => session.configure(AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+        avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.allowBluetooth,
+        avAudioSessionMode: AVAudioSessionMode.voiceChat,
+        androidAudioAttributes: const AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.speech,
+          usage: AndroidAudioUsage.voiceCommunication,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+      )));
+
       try {
         await _audioChannel.invokeMethod('enableLiveAssistAudio');
-        debugPrint('✅ Native audio routing enabled (MODE_IN_COMMUNICATION + BT SCO)');
-      } catch (e) {
-        debugPrint('⚠️ Native audio routing failed: $e');
-      }
+      } catch (_) {}
 
-      // Optimization: If using Bluetooth Buds (not ASHA), wait 1s for SCO to stabilize
-      if (_hasHeadphones && !_isHearingAid) {
-        debugPrint('⏳ Waiting for Bluetooth SCO synchronization...');
-        await Future.delayed(const Duration(milliseconds: 1000));
-      }
-
+      await _audioIo.requestLatency(AudioIoLatency.Balanced);
       await _audioIo.start();
-
       _enhancement.reset();
-      _enhancement.setEnabled(_enhancementOn);
 
+      // ── DSP State ──
+      double env = 0.0;
+      double gateGain = 0.0;
+      bool isOpen = false;
+      
+      double dclastX = 0.0, dclastY = 0.0;
+      const double r = 0.995;
+
+      // Telephone-grade Low-Pass (approx 3.5kHz cutoff)
+      // This is the most effective way to kill 'TV static'
+      double lp1 = 0.0, lp2 = 0.0;
+      const double lpAlpha = 0.2; // Aggressive cutoff
+
+      double noiseFloor = 0.01;
+      const double noiseAlpha = 0.9995; 
+      double sumSqIn = 0.0;
+      double sumSqOutLeft = 0.0;
+      double sumSqOutRight = 0.0;
+      
       _audioSub = _audioIo.input.listen((audioData) {
-        final startTime = DateTime.now().millisecondsSinceEpoch;
         _lastChunkSize = audioData.length;
-
-        // 1. Process through enhancement
-        final enhanced = _enhancementOn && _hasProfile
-            ? _enhancement.processAudio(audioData)
-            : audioData;
-
-        // 2. Feed to transcription if enabled
-        if (_captionOn) {
-          final pcm = Int16List(audioData.length);
-          for (int i = 0; i < audioData.length; i++) {
-            pcm[i] = (audioData[i] * 32767).toInt().clamp(-32768, 32767);
+        final processed = Float64List(audioData.length);
+        sumSqIn = 0;
+        sumSqOutLeft = 0;
+        sumSqOutRight = 0;
+        
+        // Tighter thresholds
+        final openThreshold = 0.01 + (0.05 * _suppressionLevel);
+        final closeThreshold = openThreshold * 0.7; // Much closer to open to force closure
+        
+        for (int i = 0; i < audioData.length; i++) {
+          double x = audioData[i];
+          sumSqIn += x * x;
+          
+          // 1. DC Block
+          double y = x - dclastX + r * dclastY;
+          dclastX = x; dclastY = y;
+          
+          // 2. 2nd Order Low-Pass (approx 3.5kHz)
+          lp1 = lpAlpha * y + (1.0 - lpAlpha) * lp1;
+          lp2 = lpAlpha * lp1 + (1.0 - lpAlpha) * lp2;
+          double filtered = lp2;
+          
+          // 3. Noise Floor tracking
+          double absY = filtered.abs();
+          if (absY < noiseFloor * 1.5) {
+              noiseFloor = noiseAlpha * noiseFloor + (1.0 - noiseAlpha) * absY;
           }
-          _transcription.feedAudioBytes(pcm.buffer.asUint8List());
+          
+          // 4. Aggressive Spectral Subtraction
+          double suppressionPower = 1.0 + (_suppressionLevel * 5.0); 
+          double subGain = (absY - noiseFloor * suppressionPower) / (absY + 1e-9);
+          subGain = subGain.clamp(0.001, 1.0); 
+          
+          double cleaned = filtered * subGain;
+          
+          // 5. Faster Envelope & tight Hysteresis
+          env = 0.8 * env + 0.2 * cleaned.abs();
+          if (!isOpen && env > openThreshold) {
+            isOpen = true;
+          } else if (isOpen && env < closeThreshold) {
+            isOpen = false;
+          }
+          
+          double targetGate = isOpen ? 1.0 : 0.0;
+          if (targetGate > gateGain) {
+            gateGain += 0.25 * (targetGate - gateGain); // Ultra-fast attack
+          } else {
+            gateGain += 0.05 * (targetGate - gateGain); // Faster release than before
+          }
+          
+          // Original processed value before independent ear gains
+          double finalOut = cleaned * gateGain;
+          
+          // Process Left
+          double leftOut = _enhancement.processAudio([finalOut], isLeft: true)[0];
+          // Process Right
+          double rightOut = _enhancement.processAudio([finalOut], isLeft: false)[0];
+
+          // Store for UI meters
+          sumSqOutLeft += leftOut * leftOut;
+          sumSqOutRight += rightOut * rightOut;
+
+          // Note: If audio_io output is mono, we'll just average or pick one.
+          // For true Sound Amplifier, we should use a stereo output plugin if possible.
+          // For now, we'll average to mono but the logic is ready for stereo.
+          processed[i] = (leftOut + rightOut) / 2.0;
         }
 
-        // 3. Send to output immediately
-        _audioIo.output.add(enhanced);
+        _audioIo.output.add(processed);
 
-        final endTime = DateTime.now().millisecondsSinceEpoch;
-        final dspTime = endTime - startTime;
-        if (dspTime > 15) {
-          debugPrint('⚠️ High DSP Latency: ${dspTime}ms for ${audioData.length} samples');
-        }
-
-        // 3. UI Updates (THROTTLED to ~10fps)
         final now = DateTime.now().millisecondsSinceEpoch;
         if (now - _lastUiUpdate > 100) {
           _lastUiUpdate = now;
-
-          // Calculate input level (RMS)
-          double sumSq = 0;
-          for (final s in audioData) {
-            sumSq += s * s;
-          }
-          final rms = sqrt(sumSq / audioData.length);
-
-          // Calculate output level (RMS)
-          double outSumSq = 0;
-          for (final s in enhanced) {
-            outSumSq += s * s;
-          }
-          final outRms = sqrt(outSumSq / enhanced.length);
-
-          // Update spectrum visualization (simple 16-band)
-          final bandSize = enhanced.length ~/ 16;
-          for (int b = 0; b < 16 && b * bandSize < enhanced.length; b++) {
-            double bandEnergy = 0;
-            final start = b * bandSize;
-            final end = min(start + bandSize, enhanced.length);
-            for (int i = start; i < end; i++) {
-              bandEnergy += enhanced[i].abs();
-            }
-            _spectrumBars[b] = (bandEnergy / max(1, end - start)).clamp(0.0, 1.0);
-          }
-
+          final rmsIn = sqrt(sumSqIn / audioData.length);
           if (mounted) {
             setState(() {
-              _inputLevel = (rms * 10).clamp(0.0, 1.0);
-              _outputLevel = (outRms * 10).clamp(0.0, 1.0);
+              _inputLevel = (rmsIn * 5).clamp(0.0, 1.0);
+              // Use average of L/R for the main meter
+              final rmsOut = sqrt((sumSqOutLeft + sumSqOutRight) / (2 * audioData.length));
+              _outputLevel = (rmsOut * 10).clamp(0.0, 1.0);
             });
+          }
+          
+          // Update spectrum based on CLEANED data
+          final bandSize = audioData.length ~/ 16;
+          for (int b = 0; b < 16 && b * bandSize < audioData.length; b++) {
+            double bandEnergy = 0;
+            final start = b * bandSize;
+            final end = min(start + bandSize, audioData.length);
+            for (int i = start; i < end; i++) bandEnergy += processed[i].abs();
+            _spectrumBars[b] = (bandEnergy * 10 / max(1, end - start)).clamp(0.0, 1.0);
           }
         }
       });
@@ -232,19 +282,17 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
       await _audioIo.stop();
     } catch (_) {}
 
-    if (_captionOn) {
-      await _transcription.stopListening();
-    }
-
     // Disable native audio routing (reset MODE + stop BT SCO)
+    // This is CRITICAL to stop the sticky hardware static
     try {
       await _audioChannel.invokeMethod('disableLiveAssistAudio');
-      debugPrint('✅ Native audio routing disabled');
-    } catch (e) {
-      debugPrint('⚠️ Native audio routing disable failed: $e');
-    }
+    } catch (_) {}
 
-    _enhancement.reset();
+    // Deactivate audio session
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(false);
+    } catch (_) {}
     if (mounted) {
       setState(() {
         _isRunning = false;
@@ -255,34 +303,158 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
     }
   }
 
-  Future<void> _toggleCaption(bool enabled) async {
-    if (enabled) {
-      final ok = await _transcription.startListening(
-        useExternalSource: true,
-        language: _captionLang,
-        onStatusChanged: (status) {
-          if (mounted) setState(() => _captionStatus = status);
-        },
-        onPartial: (text) {
-          if (mounted) setState(() => _transcript = text);
-        },
-        onResult: (text) {
-          if (mounted) setState(() => _transcript = text);
-        },
-      );
-      if (ok) {
-        setState(() => _captionOn = true);
-      } else {
-        _showSnackBar('Failed to start transcription', Colors.orange);
-      }
-    } else {
-      await _transcription.stopListening();
-      setState(() {
-        _captionOn = false;
-        _captionStatus = 'Idle';
-        _transcript = 'Live captions will appear here...';
-      });
-    }
+
+
+  Widget _buildSoundAmplifierControls() {
+    return Column(
+      children: [
+        // ── Independent Ear Controls ──
+        Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E2139),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white.withOpacity(0.05)),
+          ),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Boost', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  Row(
+                    children: [
+                      const Text('Link ears', style: TextStyle(color: Colors.white60, fontSize: 12)),
+                      Switch(
+                        value: _linkEars,
+                        onChanged: (val) => setState(() => _linkEars = val),
+                        activeColor: Colors.blueAccent,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _buildVerticalGainSlider('L', _leftBoost, Colors.blueAccent, (val) {
+                    setState(() {
+                      _leftBoost = val;
+                      if (_linkEars) _rightBoost = val;
+                    });
+                    _enhancement.setLeftGain(_leftBoost);
+                    if (_linkEars) _enhancement.setRightGain(_rightBoost);
+                  }),
+                  _buildVerticalGainSlider('R', _rightBoost, Colors.cyanAccent, (val) {
+                    setState(() {
+                      _rightBoost = val;
+                      if (_linkEars) _leftBoost = val;
+                    });
+                    _enhancement.setRightGain(_rightBoost);
+                    if (_linkEars) _enhancement.setLeftGain(_leftBoost);
+                  }),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Fine-tuning (Tone) ──
+        _buildControlCard(
+          icon: Icons.tune_rounded,
+          label: 'Fine-tuning',
+          child: Column(
+            children: [
+              Slider(
+                value: _tone,
+                onChanged: (val) {
+                  setState(() => _tone = val);
+                  _enhancement.setTone(val);
+                },
+                activeColor: Colors.indigoAccent,
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Clarity', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                    Text('Fullness', style: TextStyle(color: Colors.white38, fontSize: 11)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 20),
+
+        // ── Noise Reduction ──
+        _buildControlCard(
+          icon: Icons.waves_rounded,
+          label: 'Noise reduction',
+          child: Slider(
+            value: _suppressionLevel,
+            onChanged: (val) {
+              setState(() => _suppressionLevel = val);
+              _enhancement.setSuppression(val);
+            },
+            activeColor: const Color(0xFF4CAF50),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVerticalGainSlider(String label, double value, Color color, ValueChanged<double> onChanged) {
+    return Column(
+      children: [
+        SizedBox(
+          height: 180,
+          child: RotatedBox(
+            quarterTurns: 3,
+            child: Slider(
+              value: value,
+              min: 0.0,
+              max: 2.0,
+              activeColor: color,
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
+        Text('${(value * 10).toInt()} dB', style: const TextStyle(color: Colors.white38, fontSize: 11)),
+      ],
+    );
+  }
+
+  Widget _buildControlCard({required IconData icon, required String label, required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2139),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: Colors.blueAccent, size: 20),
+              const SizedBox(width: 12),
+              Text(label, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
   }
 
   void _showSnackBar(String msg, Color color) {
@@ -313,7 +485,7 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text("Live Assist",
+        title: const Text("Sound Amplifier",
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
         centerTitle: true,
       ),
@@ -362,22 +534,29 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
                 ),
               ),
 
+              // ── Sound Amplifier Controls ──
+              _buildSoundAmplifierControls(),
+
+              const SizedBox(height: 12),
+
               if (_isHearingAid) ...[
                 const SizedBox(height: 12),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.blueAccent.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+                    color: const Color(0xFF4CAF50).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF4CAF50).withOpacity(0.3)),
                   ),
                   child: const Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.hearing, color: Colors.blueAccent, size: 14),
+                      Icon(Icons.hearing_rounded, color: Color(0xFF4CAF50), size: 16),
                       SizedBox(width: 8),
-                      Text('Direct Hearing Aid Stream Active (ASHA/HAP)', 
-                          style: TextStyle(color: Colors.blueAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                      Text(
+                        'ASHA Hearing Aid Connected',
+                        style: TextStyle(color: Color(0xFF4CAF50), fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
                     ],
                   ),
                 ),
@@ -387,16 +566,6 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
                 const SizedBox(height: 12),
                 _buildMicSourceSelector(),
               ],
-
-              const SizedBox(height: 16),
-              _buildCaptionToggle(),
-
-              if (_captionOn) ...[
-                const SizedBox(height: 12),
-                _buildLanguageSelector(),
-                const SizedBox(height: 12),
-                _buildTranscriptArea(),
-              ],
             ],
           ),
         ),
@@ -404,114 +573,7 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
     );
   }
 
-  Widget _buildLanguageSelector() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        _buildLangChip('English', 'en'),
-        const SizedBox(width: 12),
-        _buildLangChip('Urdu', 'ur'),
-        const Spacer(),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: Colors.white10,
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(
-            'Status: $_captionStatus',
-            style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.bold),
-          ),
-        ),
-      ],
-    );
-  }
 
-  Widget _buildLangChip(String label, String code) {
-    bool isSelected = _captionLang == code;
-    return GestureDetector(
-      onTap: () {
-        if (_captionLang == code) return;
-        setState(() => _captionLang = code);
-        if (_captionOn) {
-          _toggleCaption(false).then((_) => _toggleCaption(true));
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF6C63FF).withOpacity(0.2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? const Color(0xFF6C63FF) : Colors.white24),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.white38,
-            fontSize: 12,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCaptionToggle() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E2139),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.subtitles_rounded,
-            color: _captionOn ? const Color(0xFF4CAF50) : Colors.white54,
-            size: 20,
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Live Caption',
-              style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-          ),
-          Switch(
-            value: _captionOn,
-            onChanged: _isRunning ? (val) => _toggleCaption(val) : null,
-            activeColor: const Color(0xFF4CAF50),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTranscriptArea() {
-    return Container(
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 120, maxHeight: 200),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.3),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF6C63FF).withOpacity(0.3)),
-      ),
-      child: SingleChildScrollView(
-        reverse: true,
-        child: Text(
-          _transcript,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w500,
-            height: 1.5,
-          ),
-        ),
-      ),
-    );
-  }
 
   Widget _buildProfileCard() {
     return Container(

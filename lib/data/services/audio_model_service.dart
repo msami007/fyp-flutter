@@ -40,31 +40,45 @@ class AudioModelService {
     }
   }
 
-  /// Process a block of audio through DTLN
-  /// Expected block size depends on the model (e.g., 512 samples)
+  /// Process a fixed-size block of 16kHz audio through DTLN.
+  /// Input must be exactly the expected block size (e.g., 512 samples).
   Float32List processDtln(Float32List input) {
     if (_dtlnInterpreter == null) return input;
 
-    // Reshape input for TFLite [1, block_size]
-    var inputReshaped = input.reshape([1, input.length]);
-    var outputReshaped = Float32List(input.length).reshape([1, input.length]);
+    try {
+      // Reshape input for TFLite [1, block_size]
+      var inputReshaped = input.reshape([1, input.length]);
+      var outputBuffer = List.generate(1, (_) => Float32List(input.length));
 
-    _dtlnInterpreter!.run(inputReshaped, outputReshaped);
+      _dtlnInterpreter!.run(inputReshaped, outputBuffer);
 
-    // Flatten back to Float32List
-    return Float32List.fromList(outputReshaped[0] as List<double>);
+      // Flatten back to Float32List
+      return Float32List.fromList(
+        outputBuffer[0].map((e) => (e as num).toDouble()).toList(),
+      );
+    } catch (e) {
+      debugPrint('⚠️ DTLN inference error: $e — returning input unchanged');
+      return input;
+    }
   }
 
-  /// Process a block of audio through RNN
+  /// Process a fixed-size block of 16kHz audio through RNN.
   Float32List processRnn(Float32List input) {
     if (_rnnInterpreter == null) return input;
 
-    var inputReshaped = input.reshape([1, input.length]);
-    var outputReshaped = Float32List(input.length).reshape([1, input.length]);
+    try {
+      var inputReshaped = input.reshape([1, input.length]);
+      var outputBuffer = List.generate(1, (_) => Float32List(input.length));
 
-    _rnnInterpreter!.run(inputReshaped, outputReshaped);
+      _rnnInterpreter!.run(inputReshaped, outputBuffer);
 
-    return Float32List.fromList(outputReshaped[0] as List<double>);
+      return Float32List.fromList(
+        outputBuffer[0].map((e) => (e as num).toDouble()).toList(),
+      );
+    } catch (e) {
+      debugPrint('⚠️ RNN inference error: $e — returning input unchanged');
+      return input;
+    }
   }
 
   void dispose() {

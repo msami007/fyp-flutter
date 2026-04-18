@@ -6,11 +6,14 @@ import android.media.AudioManager
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import android.media.audiofx.DynamicsProcessing
+import android.media.audiofx.DynamicsProcessing.*
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.fyp_flutter/audio_route"
     private var audioManager: AudioManager? = null
+    private var dynamicsProcessing: DynamicsProcessing? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -20,6 +23,19 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler {
                 call, result ->
             when (call.method) {
+                "initDynamicsProcessing" -> {
+                    val sessionId = call.argument<Int>("sessionId") ?: 0
+                    initDynamicsProcessing(sessionId)
+                    result.success(true)
+                }
+                "updateDynamicsProcessing" -> {
+                    val leftGain = call.argument<Double>("leftGain")?.toFloat() ?: 1.0f
+                    val rightGain = call.argument<Double>("rightGain")?.toFloat() ?: 1.0f
+                    val tone = call.argument<Double>("tone")?.toFloat() ?: 0.5f
+                    val suppression = call.argument<Double>("suppression")?.toFloat() ?: 0.5f
+                    updateDynamicsProcessing(leftGain, rightGain, tone, suppression)
+                    result.success(true)
+                }
                 "getActiveAudioDevice" -> {
                     val am = audioManager!!
                     val devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
@@ -39,23 +55,21 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(activeDevice)
                 }
-
                 "enableLiveAssistAudio" -> {
                     try {
                         val am = audioManager!!
-
-                        // Check for Hearing Aid (ASHA/HAP)
                         val outDevices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
                         val isHearingAid = outDevices.any { it.type == AudioDeviceInfo.TYPE_HEARING_AID }
-
                         if (isHearingAid) {
-                            // ASHA devices: Use normal mode + direct routing (Phone Mic Required)
                             am.mode = AudioManager.MODE_NORMAL
                         } else {
-                            // Standard: Use Communication mode for AEC/NS
                             am.mode = AudioManager.MODE_IN_COMMUNICATION
                             am.isSpeakerphoneOn = false
-
+                            try {
+                                am.setParameters("noise_suppression=on")
+                                am.setParameters("mic_mode=voice_focus")
+                                am.setParameters("vc_ns_mode=auto")
+                            } catch (e: Exception) {}
                             if (hasBluetoothDevice(am)) {
                                 if (am.isBluetoothScoAvailableOffCall) {
                                     am.startBluetoothSco()
@@ -63,36 +77,88 @@ class MainActivity : FlutterActivity() {
                                 }
                             }
                         }
-
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("AUDIO_ERROR", e.message, null)
                     }
                 }
-
                 "disableLiveAssistAudio" -> {
                     try {
+                        if (dynamicsProcessing != null) {
+                            dynamicsProcessing?.enabled = false
+                            dynamicsProcessing?.release()
+                            dynamicsProcessing = null
+                        }
                         val am = audioManager!!
-
-                        // Stop Bluetooth SCO
                         if (am.isBluetoothScoOn) {
                             am.isBluetoothScoOn = false
                             am.stopBluetoothSco()
                         }
-
-                        // Reset audio mode back to normal
                         am.mode = AudioManager.MODE_NORMAL
                         am.isSpeakerphoneOn = false
-
                         result.success(true)
                     } catch (e: Exception) {
                         result.error("AUDIO_ERROR", e.message, null)
                     }
                 }
-
-                else -> result.notImplemented()
             }
         }
+    }
+
+    private fun initDynamicsProcessing(sessionId: Int) {
+        if (dynamicsProcessing != null) {
+            dynamicsProcessing?.release()
+        }
+
+        val builder = Config.Builder(
+            VARIANT_FAVOR_FREQUENCY_RESOLUTION,
+            2, // Stereo (Left/Right)
+            true, // PreEQ
+            8,    // bands
+            true, // MultiBandCompressor
+            8,    // bands
+            true, // PostEQ
+            8,    // bands
+            true  // Limiter
+        )
+
+        dynamicsProcessing = DynamicsProcessing(0, sessionId, builder.build())
+        dynamicsProcessing?.enabled = true
+    }
+
+    private fun updateDynamicsProcessing(leftGain: Float, rightGain: Float, tone: Float, suppression: Float) {
+        val dp = dynamicsProcessing ?: return
+        
+        // 1. Set Per-Channel Gain (Post-processing)
+        // DynamicsProcessing handles this via Config, so we'll rely on Dart-side gain for L/R balance.
+        
+        // 2. Tone Adjustment (PostEQ)
+        // ... existing logic ...
+        // Clarity (High boost) vs Fullness (Low boost)
+        val postEq = dp.getPostEqByChannelIndex(0) // Map to first channel (we'll treat as both for simplicity if mono)
+        
+        // Simple 3-band tone control
+        val lowGain = tone * 12f // 0.0 -> 0dB, 1.0 -> 12dB
+        val highGain = (1.0f - tone) * 12f // 0.0 -> 12dB, 1.0 -> 0dB
+        
+        for (i in 0 until postEq.bandCount) {
+            val band = postEq.getBand(i)
+            if (band.cutoffFrequency < 500) {
+                band.gain = lowGain
+            } else if (band.cutoffFrequency > 3000) {
+                band.gain = highGain
+            } else {
+                band.gain = 0f
+            }
+            postEq.setBand(i, band)
+        }
+        dp.setPostEqAllChannelsTo(postEq)
+
+        // 3. Limiter (Safety)
+        val limiter = dp.getLimiterByChannelIndex(0)
+        limiter.threshold = -1.0f // -1dB threshold
+        limiter.ratio = 10f
+        dp.setLimiterAllChannelsTo(limiter)
     }
 
     private fun hasBluetoothDevice(am: AudioManager): Boolean {

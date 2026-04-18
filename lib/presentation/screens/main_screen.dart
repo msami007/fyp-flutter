@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'live_assist_screen.dart';
+import 'transcription_screen.dart';
+import 'conversation_history_screen.dart';
 import 'connect_device_screen.dart';
 import 'menu_screen.dart';
 
@@ -17,6 +19,8 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _pages = const [
     HomeScreen(),
     LiveAssistScreen(),
+    TranscriptionScreen(),
+    ConversationHistoryScreen(),
     ConnectDeviceScreen(),
     MenuScreen(),
   ];
@@ -77,16 +81,28 @@ class _MainScreenState extends State<MainScreen> {
                   index: 1,
                 ),
                 _buildNavItem(
+                  icon: Icons.subtitles_outlined,
+                  activeIcon: Icons.subtitles_rounded,
+                  label: 'Caption',
+                  index: 2,
+                ),
+                _buildNavItem(
+                  icon: Icons.history_rounded,
+                  activeIcon: Icons.history_rounded,
+                  label: 'History',
+                  index: 3,
+                ),
+                _buildNavItem(
                   icon: Icons.bluetooth_outlined,
                   activeIcon: Icons.bluetooth_rounded,
                   label: 'Devices',
-                  index: 2,
+                  index: 4,
                 ),
                 _buildNavItem(
                   icon: Icons.person_outline_rounded,
                   activeIcon: Icons.person_rounded,
                   label: 'Profile',
-                  index: 3,
+                  index: 5,
                 ),
               ],
             ),

@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/HearingProfileService.dart';
 import '../../data/services/audio_enhancement_service.dart';
 import 'live_assist_screen.dart';
+import 'transcription_screen.dart';
+import 'conversation_history_screen.dart';
 import 'hearing_test_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -255,26 +257,50 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildQuickActions() {
-    return Row(
+    return Column(
       children: [
-        _buildActionCard(
-          "Test Hearing",
-          Icons.speed,
-          () {
-            if (_userId != null) {
-              Navigator.push(context, MaterialPageRoute(builder: (_) => HearingTestScreen(userId: _userId!)));
-            } else {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User session not found')));
-            }
-          },
+        Row(
+          children: [
+            _buildActionCard(
+              "Test Hearing",
+              Icons.speed,
+              () {
+                if (_userId != null) {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => HearingTestScreen(userId: _userId!)));
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User session not found')));
+                }
+              },
+            ),
+            const SizedBox(width: 16),
+            _buildActionCard(
+              "Live Caption",
+              Icons.subtitles_rounded,
+              () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const TranscriptionScreen()));
+              },
+            ),
+          ],
         ),
-        const SizedBox(width: 16),
-        _buildActionCard(
-          "AI Settings",
-          Icons.tune,
-          () {
-            // Placeholder: Navigate to settings or profile
-          },
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            _buildActionCard(
+              "History",
+              Icons.history_rounded,
+              () {
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ConversationHistoryScreen()));
+              },
+            ),
+            const SizedBox(width: 16),
+            _buildActionCard(
+              "AI Settings",
+              Icons.tune,
+              () {
+                // Placeholder
+              },
+            ),
+          ],
         ),
       ],
     );
