@@ -37,6 +37,21 @@ android {
             signingConfig = signingConfigs.getByName("debug")
         }
     }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    buildFeatures {
+        prefab = true
+    }
+}
+
+dependencies {
+    implementation("com.google.ai.edge.litert:litert:1.4.0")
 }
 
 flutter {

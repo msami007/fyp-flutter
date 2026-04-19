@@ -18,6 +18,9 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        System.loadLibrary("native_audio")
+        initNativeAudio()
+
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler {
@@ -170,4 +173,6 @@ class MainActivity : FlutterActivity() {
                 it.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
         }
     }
+
+    private external fun initNativeAudio()
 }

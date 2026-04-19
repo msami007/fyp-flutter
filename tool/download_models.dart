@@ -13,6 +13,10 @@ const models = {
       'https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip',
   'vosk-model-small-hi-0.22.zip':
       'https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip',
+  'dtln_1.tflite':
+      'https://github.com/breizhn/DTLN/raw/master/pretrained_model/model_1.tflite',
+  'dtln_2.tflite':
+      'https://github.com/breizhn/DTLN/raw/master/pretrained_model/model_2.tflite',
 };
 
 Future<void> main() async {
