@@ -73,6 +73,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('jwt_token', data['token']);
         await prefs.setString('user_id', data['user']['_id']);
+        await prefs.setString('full_name', data['user']['fullname'] ?? '');
+        await prefs.setString('username', data['user']['username'] ?? '');
+        await prefs.setString('email', data['user']['email'] ?? '');
 
         final userId = data['user']['_id'];
         final hearingService = HearingProfileService();
