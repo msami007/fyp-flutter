@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/services/HearingProfileService.dart';
 
@@ -29,13 +30,61 @@ class _ProfileAccountScreenState extends State<ProfileAccountScreen> {
     final prefs = await SharedPreferences.getInstance();
     final profileService = HearingProfileService();
     
+    _userId = prefs.getString('user_id');
+    _username = prefs.getString('username');
+    final token = prefs.getString('jwt_token');
+    debugPrint('Profile: Loaded from prefs - userId: $_userId, token available: ${token != null}');
+    
+    // Attempt to fetch fresh data from server if userId is available
+    if (_userId != null && _userId!.isNotEmpty && token != null) {
+      try {
+        final url = 'http://145.79.8.129:3000/api/admin/get-customer/$_userId';
+        debugPrint('Profile: Fetching customer details from $url');
+        final response = await http.get(
+          Uri.parse(url),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+        );
+        
+        debugPrint('Profile: API Response - Status: ${response.statusCode}');
+        debugPrint('Profile: API Response - Body: ${response.body}');
+
+        if (response.statusCode == 200) {
+          final data = json.decode(response.body);
+          // The API returns the user object directly at the root
+          _fullName = data['fullname'];
+          _email = data['email'];
+          debugPrint('Profile: Success - Name: $_fullName, Email: $_email');
+          
+          // Persist locally for next time
+          if (_fullName != null) await prefs.setString('full_name', _fullName!);
+          if (_email != null) await prefs.setString('email', _email!);
+        } else if (response.statusCode == 401) {
+          debugPrint('Profile: Token expired or invalid. 401 Unauthorized.');
+          // Optional: Redirect to login if token is expired
+        } else {
+          debugPrint('Profile: API error fetching customer details (Status: ${response.statusCode})');
+        }
+      } catch (e) {
+        debugPrint('Profile: Exception fetching customer details: $e');
+      }
+    }
+
+    // Fallback to local data if server fetch failed or was skipped
+    if (_fullName == null || _fullName!.isEmpty) {
+      _fullName = prefs.getString('full_name');
+      debugPrint('Profile: Falling back to local full_name: $_fullName');
+    }
+    if (_email == null || _email!.isEmpty) {
+      _email = prefs.getString('email');
+      debugPrint('Profile: Falling back to local email: $_email');
+    }
+
     final hp = await profileService.getLocalProfile();
     
     setState(() {
-      _userId = prefs.getString('user_id');
-      _fullName = prefs.getString('full_name');
-      _username = prefs.getString('username');
-      _email = prefs.getString('email');
       _hearingProfile = hp;
       _isLoading = false;
     });

@@ -6,6 +6,7 @@ import 'package:google_speech/google_speech.dart';
 import 'package:google_speech/generated/google/cloud/speech/v1/cloud_speech.pb.dart' as pb hide SpeechClient;
 import 'package:record/record.dart';
 import 'package:vosk_flutter_2/vosk_flutter_2.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../../core/constants/api_keys.dart';
 import '../utils/devanagari_to_roman.dart';
 
@@ -21,9 +22,11 @@ class TranscriptionService {
 
   // ── Cloud engine (Google Cloud STT) ──
   late SpeechToText _googleSpeech;
+  final stt.SpeechToText _nativeSpeech = stt.SpeechToText();
   final AudioRecorder _audioRecorder = AudioRecorder();
   StreamSubscription<pb.StreamingRecognizeResponse>? _audioStreamSubscription;
   bool _speechReady = false;
+  bool _nativeReady = false;
 
   // ── On-device engine ──
   VoskFlutterPlugin? _vosk;
@@ -39,6 +42,7 @@ class TranscriptionService {
   bool _useExternalSource = false;
   StreamController<List<int>>? _externalAudioController;
   String _status = 'Idle'; 
+  bool _isRestartingNative = false;
 
   // ── Stored callbacks for auto-restart ──
   Function(String text)? _onPartial;
@@ -118,7 +122,33 @@ class TranscriptionService {
       _voskReady = false;
     }
 
-    return isReady;
+    // Init native STT (System STT)
+    try {
+      _nativeReady = await _nativeSpeech.initialize(
+        onStatus: (status) {
+          debugPrint('📱 Native STT Status: $status');
+          // Auto-restart if it stops while we are supposed to be listening
+          if (_isListening && _nativeReady && status == 'done' && _currentLanguage == 'auto' && !_isRestartingNative) {
+            _isRestartingNative = true;
+            debugPrint('📱 Native STT: Cooling down before restart...');
+            Future.delayed(const Duration(milliseconds: 1000), () {
+              if (_isListening && _currentLanguage == 'auto') {
+                debugPrint('📱 Native STT: Auto-restarting now...');
+                _startNativeSystem(onEngineChanged: _onEngineChanged);
+              }
+              _isRestartingNative = false;
+            });
+          }
+        },
+        onError: (error) => debugPrint('❌ Native STT Error: $error'),
+      );
+      if (_nativeReady) debugPrint('✅ Native System STT ready');
+    } catch (e) {
+      debugPrint('⚠️ Native STT init error: $e');
+      _nativeReady = false;
+    }
+
+    return isReady || _nativeReady;
   }
 
   // Handlers for cloud status/error are now integrated into the streaming logic
@@ -169,6 +199,15 @@ class TranscriptionService {
     }
 
     final online = await _hasInternet();
+
+    // If 'auto' is selected, use Native System STT (Gboard/Keyboard) as requested
+    if (language == 'auto') {
+      if (_nativeReady) {
+        return _startNativeSystem(onEngineChanged: onEngineChanged);
+      } else if (online && _speechReady) {
+        return _startCloud(onEngineChanged: onEngineChanged);
+      }
+    }
 
     if (online && _speechReady) {
       return _startCloud(onEngineChanged: onEngineChanged);
@@ -285,6 +324,43 @@ class TranscriptionService {
     }
   }
 
+  // ── Native System engine (Gboard/Keyboard) ──
+  Future<bool> _startNativeSystem({Function(bool)? onEngineChanged}) async {
+    try {
+      if (!_nativeReady) return false;
+
+      _isListening = true;
+      _usingCloudEngine = true; // Treating native as "online-like" for indicator simplicity
+      onEngineChanged?.call(true);
+      _onStatusChanged?.call('System (Keyboard)');
+
+      await _nativeSpeech.listen(
+        onResult: (result) {
+          if (result.finalResult) {
+            _onResult?.call(result.recognizedWords);
+          } else {
+            _onPartial?.call(result.recognizedWords);
+          }
+        },
+        listenFor: const Duration(minutes: 5),
+        pauseFor: const Duration(seconds: 10),
+        partialResults: true,
+        cancelOnError: true,
+        listenMode: stt.ListenMode.dictation,
+      );
+
+      debugPrint('📱 Native System STT listening');
+      return true;
+    } catch (e) {
+      debugPrint('❌ Native STT failed: $e');
+      _onStatusChanged?.call('Auto fallback');
+      if (_voskReady) {
+        return _startDevice(onEngineChanged: onEngineChanged);
+      }
+      return false;
+    }
+  }
+
   // ── On-device engine ──
   Future<bool> _startDevice({Function(bool)? onEngineChanged}) async {
     try {
@@ -344,6 +420,9 @@ class TranscriptionService {
     _isListening = false;  // Set first to prevent auto-restart
 
     if (_usingCloudEngine) {
+      if (_nativeSpeech.isListening) {
+        await _nativeSpeech.stop();
+      }
       await _stopCloudStreaming();
     } else {
       if (_voskSpeechService != null) {

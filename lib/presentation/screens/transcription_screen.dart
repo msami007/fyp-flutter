@@ -21,8 +21,9 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
   int _recordingSeconds = 0;
   Timer? _timer;
   String _selectedLang = 'en';
-  String _statusMessage = 'Loading Whisper models...';
+  String _statusMessage = 'Ready. Tap Start to begin.';
   bool _isUsingOnlineEngine = false;
+  String _activeEngineName = 'WHISPER';
 
   @override
   void initState() {
@@ -71,6 +72,20 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
       language: _selectedLang,
       onEngineChanged: (isOnline) {
         if (mounted) setState(() => _isUsingOnlineEngine = isOnline);
+      },
+      onStatusChanged: (status) {
+        if (mounted) {
+          setState(() {
+            _statusMessage = status;
+            if (status.contains('System')) {
+              _activeEngineName = 'SYSTEM STT';
+            } else if (status.contains('Online')) {
+              _activeEngineName = 'GOOGLE CLOUD';
+            } else {
+              _activeEngineName = 'OFFLINE VOSK';
+            }
+          });
+        }
       },
       onPartial: (text) {
         if (mounted) setState(() => _currentPartial = text);
@@ -235,15 +250,15 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            _isUsingOnlineEngine ? Icons.cloud_done_rounded : Icons.offline_bolt_rounded, 
+                            _activeEngineName == 'GOOGLE CLOUD' ? Icons.cloud_done_rounded : Icons.phone_android_rounded, 
                             size: 14, 
-                            color: _isUsingOnlineEngine ? Colors.green : Colors.orange
+                            color: _activeEngineName == 'GOOGLE CLOUD' ? Colors.green : Colors.blueAccent
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            _isUsingOnlineEngine ? 'GOOGLE CLOUD' : 'OFFLINE VOSK',
+                            _activeEngineName,
                             style: TextStyle(
-                              color: _isUsingOnlineEngine ? Colors.green : Colors.orange,
+                              color: _activeEngineName == 'GOOGLE CLOUD' ? Colors.green : Colors.blueAccent,
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                             ),

@@ -28,6 +28,13 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 16 KB Page Alignment support
+        externalNativeBuild {
+            cmake {
+                arguments("-DANDROID_STL=c++_shared", "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,common-page-size=16384 -Wl,-z,max-page-size=16384")
+            }
+        }
     }
 
     buildTypes {
@@ -47,6 +54,12 @@ android {
 
     buildFeatures {
         prefab = true
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 

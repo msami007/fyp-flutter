@@ -15,19 +15,18 @@ subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 }
+
 subprojects {
     project.evaluationDependsOn(":app")
 }
 
-subprojects {
-    afterEvaluate {
-        if (project.hasProperty("android")) {
-            val android = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
-            if (android.namespace == null) {
-                // Fix for legacy plugins like vosk_flutter_2
-                when (project.name) {
-                    "vosk_flutter_2" -> android.namespace = "com.alphacephei.vosk_flutter_2"
-                }
+// Global fix for legacy plugins that are missing a namespace (e.g. vosk_flutter_2)
+allprojects {
+    project.plugins.withId("com.android.library") {
+        val extension = project.extensions.getByType(com.android.build.gradle.LibraryExtension::class.java)
+        if (extension.namespace == null) {
+            if (project.name == "vosk_flutter_2") {
+                 extension.namespace = "com.alphacephei.vosk_flutter_2"
             }
         }
     }
