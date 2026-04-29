@@ -26,7 +26,7 @@ allprojects {
         val extension = project.extensions.getByType(com.android.build.gradle.LibraryExtension::class.java)
         if (extension.namespace == null) {
             if (project.name == "vosk_flutter_2") {
-                 extension.namespace = "com.alphacephei.vosk_flutter_2"
+                extension.namespace = "org.vosk.vosk_flutter"
             }
         }
     }
