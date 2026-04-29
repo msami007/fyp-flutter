@@ -93,49 +93,45 @@ class _ProfileAccountScreenState extends State<ProfileAccountScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF070B1D), // Darker background as in image
       appBar: AppBar(
-        title: const Text('Account Profile', style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF1E2139),
+        backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
       ),
-      backgroundColor: const Color(0xFF0A0E27),
+      extendBodyBehindAppBar: true,
       body: _isLoading 
         ? const Center(child: CircularProgressIndicator(color: Color(0xFF6C63FF)))
         : SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16.0),
+          physics: const BouncingScrollPhysics(),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildSectionTitle('Personal Information'),
-              const SizedBox(height: 12),
-              _buildInfoCard([
-                _buildInfoRow(Icons.person_rounded, 'Full Name', _fullName ?? 'Not set'),
-                _buildDivider(),
-                _buildInfoRow(Icons.alternate_email_rounded, 'Username', _username ?? 'Not set'),
-                _buildDivider(),
-                _buildInfoRow(Icons.email_rounded, 'Email', _email ?? 'Not set'),
-              ]),
+              const SizedBox(height: 20),
+              _buildAvatarSection(),
+              const SizedBox(height: 40),
               
-              const SizedBox(height: 24),
-              _buildSectionTitle('Hearing Profile'),
-              const SizedBox(height: 12),
-              _hearingProfile == null 
-                ? _buildEmptyHearingCard()
-                : _buildHearingProfileCard(),
-              
-              const SizedBox(height: 24),
-              _buildSectionTitle('Account Security'),
-              const SizedBox(height: 12),
-              _buildInfoCard([
-                _buildInfoRow(Icons.badge_rounded, 'User ID', _userId ?? 'Not available'),
-              ]),
-              
-              const SizedBox(height: 32),
-              Center(
-                child: Text(
-                  'HearWise v1.0.0',
-                  style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSectionHeader(Icons.person_outline_rounded, 'PERSONAL DETAILS'),
+                    const SizedBox(height: 16),
+                    _buildDetailsCard(),
+                    
+                    const SizedBox(height: 32),
+                    _buildSectionHeader(Icons.hearing_outlined, 'HEARING STATUS'),
+                    const SizedBox(height: 16),
+                    _hearingProfile == null 
+                      ? _buildEmptyHearingCard()
+                      : _buildHearingStatusGrid(),
+                    
+                    const SizedBox(height: 40),
+                  ],
                 ),
               ),
             ],
@@ -145,56 +141,179 @@ class _ProfileAccountScreenState extends State<ProfileAccountScreen> {
     );
   }
 
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: const TextStyle(
-        color: Colors.white,
-        fontSize: 18,
-        fontWeight: FontWeight.bold,
-        letterSpacing: 0.5,
-      ),
+  Widget _buildAvatarSection() {
+    return Column(
+      children: [
+        Stack(
+          children: [
+            Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: const Color(0xFF6C63FF), width: 4),
+              ),
+              child: Center(
+                child: Text(
+                  (_fullName?.isNotEmpty == true) ? _fullName![0].toUpperCase() : 'U',
+                  style: const TextStyle(color: Colors.white, fontSize: 56, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 5,
+              right: 5,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF6C63FF),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.edit, color: Colors.white, size: 18),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 24),
+        Text(
+          (_fullName ?? 'User Name').toUpperCase(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '@${_username ?? 'username'}',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.4),
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildInfoCard(List<Widget> children) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E2139),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+  Widget _buildSectionHeader(IconData icon, String title) {
+    return Row(
+      children: [
+        Icon(icon, color: const Color(0xFF6C63FF), size: 18),
+        const SizedBox(width: 12),
+        Text(
+          title,
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.5),
+            fontSize: 12,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailsCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        children: [
+          _buildDetailRow(Icons.face_rounded, 'Full Name', _fullName ?? 'Not set'),
+          const SizedBox(height: 24),
+          _buildDetailRow(Icons.alternate_email_rounded, 'Username', _username ?? 'Not set'),
+          const SizedBox(height: 24),
+          _buildDetailRow(Icons.email_rounded, 'Email Address', _email ?? 'Not set'),
         ],
       ),
-      child: Column(children: children),
     );
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
+  Widget _buildDetailRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E2442),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(icon, color: const Color(0xFF6C63FF), size: 22),
+        ),
+        const SizedBox(width: 20),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                value,
+                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildHearingStatusGrid() {
+    final leftGain = _hearingProfile?['leftEarGain']?.toString() ?? '1.0';
+    final rightGain = _hearingProfile?['rightEarGain']?.toString() ?? '1.0';
+
+    return Row(
+      children: [
+        Expanded(child: _buildStatusCard('LEFT EAR', '${(double.parse(leftGain) * 100).toInt()}%')),
+        const SizedBox(width: 16),
+        Expanded(child: _buildStatusCard('RIGHT EAR', '${(double.parse(rightGain) * 100).toInt()}%')),
+      ],
+    );
+  }
+
+  Widget _buildStatusCard(String ear, String percentage) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF6C63FF).withOpacity(0.1)),
+      ),
+      child: Column(
         children: [
-          Icon(icon, color: const Color(0xFF6C63FF), size: 24),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
-                ),
-              ],
+          Text(
+            ear,
+            style: const TextStyle(
+              color: Color(0xFF6C63FF),
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            percentage,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Boost Level',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.2),
+              fontSize: 10,
             ),
           ),
         ],
@@ -202,87 +321,31 @@ class _ProfileAccountScreenState extends State<ProfileAccountScreen> {
     );
   }
 
-  Widget _buildDivider() {
-    return Divider(
-      color: Colors.white.withOpacity(0.05),
-      height: 1,
-      indent: 56,
-    );
-  }
 
   Widget _buildEmptyHearingCard() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2139),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(24),
       ),
       child: Column(
         children: [
-          Icon(Icons.hearing_disabled_rounded, color: Colors.white.withOpacity(0.2), size: 48),
+          Icon(Icons.hearing_disabled_rounded, color: Colors.white.withOpacity(0.1), size: 48),
           const SizedBox(height: 16),
           const Text(
-            'No hearing profile found',
+            'No Active Profile',
             style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
             'Complete a hearing test to see your results here.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14),
+            style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13, height: 1.5),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildHearingProfileCard() {
-    final leftGain = _hearingProfile?['leftEarGain']?.toString() ?? '1.0';
-    final rightGain = _hearingProfile?['rightEarGain']?.toString() ?? '1.0';
-    
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [const Color(0xFF1E2139), const Color(0xFF1E2139).withOpacity(0.8)],
-        ),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF6C63FF).withOpacity(0.1),
-            blurRadius: 10,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          _buildInfoRow(Icons.hearing_rounded, 'Hearing Optimization', 'Active'),
-          _buildDivider(),
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _buildEarMetric('Left Ear', '${(double.parse(leftGain) * 100).toInt()}% boost'),
-                Container(width: 1, height: 40, color: Colors.white.withOpacity(0.1)),
-                _buildEarMetric('Right Ear', '${(double.parse(rightGain) * 100).toInt()}% boost'),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEarMetric(String ear, String value) {
-    return Column(
-      children: [
-        Text(ear, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
-        const SizedBox(height: 4),
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-      ],
     );
   }
 }

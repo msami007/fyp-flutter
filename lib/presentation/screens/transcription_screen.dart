@@ -78,11 +78,11 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
           setState(() {
             _statusMessage = status;
             if (status.contains('System')) {
-              _activeEngineName = 'SYSTEM STT';
+              _activeEngineName = 'WHISPER';
             } else if (status.contains('Online')) {
-              _activeEngineName = 'GOOGLE CLOUD';
+              _activeEngineName = 'WHISPER';
             } else {
-              _activeEngineName = 'OFFLINE VOSK';
+              _activeEngineName = 'WHISPER';
             }
           });
         }
@@ -123,11 +123,54 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
     final transcript = _fullTranscript;
     if (transcript.isEmpty) return;
 
-    final now = DateTime.now();
-    final title = 'Transcript ${now.day}/${now.month} ${now.hour}:${now.minute.toString().padLeft(2, '0')}';
+    final TextEditingController nameController = TextEditingController(
+      text: 'Transcript ${DateTime.now().day}/${DateTime.now().month} ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'
+    );
+
+    final String? result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2139),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('Save Transcription', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Give your transcript a name for easy search later.', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: nameController,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.05),
+                hintText: 'Enter name...',
+                hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, nameController.text),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6C63FF),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Save Transcript', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null || result.trim().isEmpty) return;
 
     await _historyService.saveConversation(
-      title: title,
+      title: result.trim(),
       transcript: transcript,
       language: _selectedLang,
       durationSeconds: _recordingSeconds,
@@ -152,221 +195,244 @@ class _TranscriptionScreenState extends State<TranscriptionScreen> {
   @override
   Widget build(BuildContext context) {
     final transcript = _fullTranscript;
-    final langName = TranscriptionService.supportedLanguages[_selectedLang] ?? 'English';
 
     return Scaffold(
+      backgroundColor: const Color(0xFF0A0E27),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text("Whisper Transcription", style: TextStyle(color: Colors.white)),
+        title: const Text(
+          "TRANSCRIPTION",
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+            letterSpacing: 2,
+          ),
+        ),
         centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
         actions: [
           if (transcript.isNotEmpty && !_isListening)
             IconButton(
-              icon: const Icon(Icons.save_rounded, color: Colors.white),
+              icon: const Icon(Icons.save_alt_rounded, color: Color(0xFF6C63FF)),
               onPressed: _saveToHistory,
-              tooltip: 'Save',
+              tooltip: 'Save Transcript',
             ),
+          const SizedBox(width: 8),
         ],
       ),
-      backgroundColor: const Color(0xFF0A0E27),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              // ── Top bar ──
-              Row(
-                children: [
-                  // Status
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: _isListening
-                          ? Colors.red.withOpacity(0.2)
-                          : _isInitializing
-                              ? Colors.orange.withOpacity(0.15)
-                              : Colors.grey.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 8, height: 8,
-                          decoration: BoxDecoration(
-                            color: _isListening ? Colors.red
-                                : _isInitializing ? Colors.orange : Colors.grey,
-                            shape: BoxShape.circle,
-                          ),
+        child: Column(
+          children: [
+            _buildStatusBar(),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                child: Column(
+                  children: [
+                    // ── Transcript Container ──
+                    Expanded(
+                      child: Container(
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF131932),
+                          borderRadius: BorderRadius.circular(32),
+                          border: Border.all(color: Colors.white.withOpacity(0.03)),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10)),
+                          ],
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _isListening ? _formatTime(_recordingSeconds)
-                              : _isInitializing ? 'Loading...' : 'Ready',
-                          style: TextStyle(
-                            color: _isListening ? Colors.red
-                                : _isInitializing ? Colors.orange : Colors.grey,
-                            fontWeight: FontWeight.w600, fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Spacer(),
-                  // Language selector
-                  if (!_isListening)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E2139),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white.withOpacity(0.1)),
-                      ),
-                      child: DropdownButton<String>(
-                        value: _selectedLang,
-                        dropdownColor: const Color(0xFF1E2139),
-                        underline: const SizedBox(),
-                        style: const TextStyle(color: Colors.white, fontSize: 13),
-                        items: TranscriptionService.supportedLanguages.entries
-                            .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-                            .toList(),
-                        onChanged: (val) {
-                          setState(() => _selectedLang = val ?? 'en');
-                        },
-                      ),
-                    ),
-                  // Engine indicator
-                  if (_isListening)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: _isUsingOnlineEngine 
-                            ? Colors.green.withOpacity(0.15) 
-                            : Colors.orange.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _activeEngineName == 'GOOGLE CLOUD' ? Icons.cloud_done_rounded : Icons.phone_android_rounded, 
-                            size: 14, 
-                            color: _activeEngineName == 'GOOGLE CLOUD' ? Colors.green : Colors.blueAccent
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _activeEngineName,
-                            style: TextStyle(
-                              color: _activeEngineName == 'GOOGLE CLOUD' ? Colors.green : Colors.blueAccent,
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
-
-              const SizedBox(height: 16),
-
-              // ── Transcript area ──
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF1E2139),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF6C63FF).withOpacity(0.3)),
-                  ),
-                  child: SingleChildScrollView(
-                    reverse: true,
-                    child: transcript.isNotEmpty
-                        ? SelectableText.rich(
-                            TextSpan(children: [
-                              if (_finalParts.isNotEmpty)
-                                TextSpan(
-                                  text: '${_finalParts.join(' ')} ',
-                                  style: const TextStyle(color: Colors.white, fontSize: 16, height: 1.6),
-                                ),
-                              if (_currentPartial.isNotEmpty)
-                                TextSpan(
-                                  text: _currentPartial,
-                                  style: TextStyle(
-                                    color: Colors.white.withOpacity(0.5),
-                                    fontSize: 16, height: 1.6,
-                                    fontStyle: FontStyle.italic,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(32),
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(32),
+                            physics: const BouncingScrollPhysics(),
+                            child: transcript.isNotEmpty
+                                ? SelectableText.rich(
+                                    TextSpan(children: [
+                                      if (_finalParts.isNotEmpty)
+                                        TextSpan(
+                                          text: '${_finalParts.join(' ')} ',
+                                          style: const TextStyle(color: Colors.white, fontSize: 20, height: 1.6, fontWeight: FontWeight.w400),
+                                        ),
+                                      if (_currentPartial.isNotEmpty)
+                                        TextSpan(
+                                          text: _currentPartial,
+                                          style: TextStyle(
+                                            color: const Color(0xFF6C63FF).withOpacity(0.8),
+                                            fontSize: 20, height: 1.6,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                    ]),
+                                  )
+                                : Center(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(Icons.waves_rounded, color: Colors.white.withOpacity(0.05), size: 64),
+                                        const SizedBox(height: 24),
+                                        Text(
+                                          _isListening ? 'LISTENING...' : 'TAP MIC TO START',
+                                          style: TextStyle(
+                                            color: Colors.white.withOpacity(0.1),
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w900,
+                                            letterSpacing: 2,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                            ]),
-                          )
-                        : Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              if (_isInitializing) ...[
-                                const CircularProgressIndicator(
-                                  color: Color(0xFF6C63FF), strokeWidth: 2.5,
-                                ),
-                                const SizedBox(height: 16),
-                              ],
-                              Text(
-                                _isListening ? 'Listening... speak now.' : _statusMessage,
-                                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 16, height: 1.6),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
                           ),
-                  ),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 32),
+
+                    // ── Control Panel ──
+                    _buildControlPanel(),
+                  ],
                 ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-              const SizedBox(height: 12),
-
-              Text(
-                'Whisper AI · $langName',
-                style: TextStyle(color: Colors.white.withOpacity(0.35), fontSize: 11),
-              ),
-
-              const SizedBox(height: 16),
-
-              // ── Buttons ──
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  ElevatedButton.icon(
-                    onPressed: (_isInitializing || !_transcription.isReady)
-                        ? null
-                        : _isListening ? _stopListening : _startListening,
-                    icon: Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded),
-                    label: Text(_isListening ? 'Stop' : 'Start', style: const TextStyle(fontSize: 16)),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isListening ? const Color(0xFFE91E63) : const Color(0xFF6C63FF),
-                      foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.grey.withOpacity(0.3),
-                      padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    ),
-                  ),
-                  if (!_isListening && transcript.isNotEmpty) ...[
-                    const SizedBox(width: 12),
-                    ElevatedButton.icon(
-                      onPressed: _saveToHistory,
-                      icon: const Icon(Icons.save_rounded, size: 18),
-                      label: const Text('Save'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF4CAF50),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
+  Widget _buildStatusBar() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 8, height: 8,
+            decoration: BoxDecoration(
+              color: _isListening ? Colors.redAccent : (_isInitializing ? Colors.orange : Colors.green),
+              shape: BoxShape.circle,
+              boxShadow: [
+                if (_isListening)
+                  BoxShadow(color: Colors.redAccent.withOpacity(0.4), blurRadius: 8, spreadRadius: 2),
+              ],
+            ),
           ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _isListening ? _formatTime(_recordingSeconds).toUpperCase() : (_isInitializing ? 'INITIALIZING' : 'READY'),
+              style: TextStyle(
+                color: _isListening ? Colors.redAccent : Colors.white.withOpacity(0.4),
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          _buildLanguagePicker(),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6C63FF).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.auto_awesome_rounded, color: Color(0xFF6C63FF), size: 10),
+                SizedBox(width: 4),
+                Text(
+                  'WHISPER',
+                  style: TextStyle(color: Color(0xFF6C63FF), fontSize: 8, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlPanel() {
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: (_isInitializing || !_transcription.isReady)
+              ? null
+              : _isListening ? _stopListening : _startListening,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 300),
+            width: 80, height: 80,
+            decoration: BoxDecoration(
+              color: _isListening ? Colors.redAccent.withOpacity(0.1) : const Color(0xFF6C63FF),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: (_isListening ? Colors.redAccent : const Color(0xFF6C63FF)).withOpacity(0.3),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+              border: Border.all(
+                color: _isListening ? Colors.redAccent : Colors.transparent,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: _isInitializing
+                  ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                  : Icon(
+                      _isListening ? Icons.stop_rounded : Icons.mic_rounded,
+                      color: Colors.white,
+                      size: 32,
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          _isListening ? 'STOP SESSION' : 'START RECORDING',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.3),
+            fontSize: 10,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 1.5,
+          ),
+        ),
+        const SizedBox(height: 24),
+      ],
+    );
+  }
+
+  Widget _buildLanguagePicker() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedLang,
+          dropdownColor: const Color(0xFF131932),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF6C63FF), size: 14),
+          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+          onChanged: (val) => setState(() => _selectedLang = val ?? 'en'),
+          items: TranscriptionService.supportedLanguages.entries
+              .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value.toUpperCase())))
+              .toList(),
         ),
       ),
     );

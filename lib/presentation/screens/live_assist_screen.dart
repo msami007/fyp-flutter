@@ -46,13 +46,15 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
   // ── Live Caption State ──
   final TranscriptionService _transcription = TranscriptionService();
   bool _showCaptions = false;
-  String _selectedLang = 'auto'; // Default to auto-detect
+  String _selectedLang = 'en'; // Default to English
   String _captionText = '';
   String _partialText = '';
   final List<String> _captionHistory = [];
   final ScrollController _captionScrollController = ScrollController();
   Timer? _captionTimer;
 
+  bool _isCaptionLoading = false;
+  bool _isCaptionCollapsed = false;
   late AnimationController _pulseController;
   Timer? _levelTimer;
 
@@ -83,7 +85,13 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
         });
         _scrollCaptionsToBottom();
       },
-      onStatusChanged: (status) => debugPrint('🎤 Caption: $status'),
+      onStatusChanged: (status) {
+        if (!mounted) return;
+        debugPrint('🎤 Caption: $status');
+        if (status.contains('listening')) {
+          setState(() => _isCaptionLoading = false);
+        }
+      },
       language: _selectedLang,
       useExternalSource: true,
     );
@@ -107,12 +115,20 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
   }
 
   void _toggleCaptions() {
-    setState(() => _showCaptions = !_showCaptions);
+    setState(() {
+      _showCaptions = !_showCaptions;
+      if (_showCaptions) {
+        _isCaptionCollapsed = false; // Always expand when first turned on
+        _isCaptionLoading = true;
+      }
+    });
+    
     if (_showCaptions && _isRunning) {
       _startCaptionPipeline();
       _showSnackBar('Live Captions ON', const Color(0xFF6C63FF));
     } else {
       _stopCaptionPipeline();
+      _isCaptionLoading = false;
       _showSnackBar('Live Captions OFF', Colors.grey);
     }
   }
@@ -267,6 +283,20 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
     super.dispose();
   }
 
+  void _showSnackBar(String msg, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+        backgroundColor: color.withOpacity(0.9),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 1),
+        width: 200,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -274,47 +304,31 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text("Sound Amplifier",
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-        centerTitle: true,
-        actions: [
-          // Language selector (visible when captions on or audio running)
-          if (_isRunning)
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: DropdownButton<String>(
-                value: _selectedLang,
-                dropdownColor: const Color(0xFF1E2139),
-                underline: const SizedBox(),
-                icon: const Icon(Icons.language_rounded, size: 16, color: Colors.blueAccent),
-                style: const TextStyle(color: Colors.white, fontSize: 12),
-                items: TranscriptionService.supportedLanguages.entries
-                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-                    .toList(),
-                onChanged: (val) {
-                  if (val != null) {
-                    setState(() => _selectedLang = val);
-                    if (_showCaptions && _isRunning) {
-                      _stopCaptionPipeline();
-                      _startCaptionPipeline();
-                    }
-                  }
-                },
-              ),
-            ),
-          IconButton(
-            onPressed: _isRunning ? _toggleCaptions : null,
-            icon: Icon(
-              _showCaptions ? Icons.closed_caption : Icons.closed_caption_off,
-              color: _showCaptions ? const Color(0xFF6C63FF) : Colors.white.withOpacity(_isRunning ? 0.7 : 0.3),
-            ),
-            tooltip: 'Live Captions',
+        title: const Text(
+          "LIVE ASSIST",
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+            letterSpacing: 2,
           ),
+        ),
+        centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
+        actions: [
+          if (_hasHeadphones && !_isHearingAid)
+            IconButton(
+              onPressed: () => setState(() => _useEarbudMic = !_useEarbudMic),
+              icon: Icon(
+                _useEarbudMic ? Icons.bluetooth_audio_rounded : Icons.phone_android_rounded,
+                color: _useEarbudMic ? const Color(0xFF6C63FF) : Colors.white38,
+              ),
+              tooltip: 'Mic Source',
+            ),
+          const SizedBox(width: 8),
         ],
       ),
       body: SafeArea(
@@ -322,383 +336,610 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
           children: [
             Expanded(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(20),
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                 child: Column(
                   children: [
-                    _buildProfileCard(),
+                    _buildCompactDiagnosticHeader(),
                     const SizedBox(height: 24),
-                    _buildLevelMeters(),
-                    const SizedBox(height: 24),
-                    _buildEnhancementToggle(),
-                    const SizedBox(height: 20),
-                    _buildMainButton(),
-                    const SizedBox(height: 12),
-                    Text(
-                      _isRunning
-                          ? 'Audio is being enhanced in real-time'
-                          : 'Tap Start to begin hearing assistance',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.4),
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildSoundAmplifierControls(),
+                    
+                    _buildMainActionButton(),
+                    const SizedBox(height: 32),
+                    
+                    _buildSectionTitle('ENHANCEMENT ENGINE'),
+                    const SizedBox(height: 16),
+                    _buildEnhancementEngineCard(),
+                    
+                    const SizedBox(height: 32),
+                    _buildSectionTitle('PERFORMANCE TUNING'),
+                    const SizedBox(height: 16),
+                    _buildUnifiedControlsCard(),
+                    
                     if (_isHearingAid) ...[
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 24),
                       _buildAshaIndicator(),
                     ],
-                    if (_hasHeadphones && !_isHearingAid) ...[
-                      const SizedBox(height: 12),
-                      _buildMicSourceSelector(),
-                    ],
-                    // Add bottom padding when captions are visible
-                    if (_showCaptions) const SizedBox(height: 160),
+                    
+                    if (_showCaptions) const SizedBox(height: 200),
+                    const SizedBox(height: 40),
                   ],
                 ),
               ),
             ),
-            // Floating Caption Bar
             if (_showCaptions && _isRunning) _buildCaptionOverlay(),
           ],
         ),
       ),
+      floatingActionButton: (!_showCaptions && _isRunning) ? FloatingActionButton(
+        onPressed: _toggleCaptions,
+        backgroundColor: const Color(0xFF6C63FF),
+        child: const Icon(Icons.closed_caption_rounded, color: Colors.white),
+      ) : null,
     );
   }
 
-  Widget _buildLevelMeters() {
-    return Column(
-      children: [
-        _buildProgressBar("MIC INPUT", _inputLevel, Colors.cyanAccent),
-        const SizedBox(height: 16),
-        _buildProgressBar("AMP OUTPUT", _outputLevel, Colors.greenAccent),
-      ],
-    );
-  }
-
-  Widget _buildProgressBar(String label, double value, Color color) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-            Text('${(value * 100).toInt()}%', style: TextStyle(color: color.withOpacity(0.8), fontSize: 10, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: value.clamp(0.0, 1.0),
-            backgroundColor: Colors.white.withOpacity(0.05),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-            minHeight: 12,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildProfileCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E2139),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: _hasProfile ? const Color(0xFF4CAF50).withOpacity(0.3) : Colors.orange.withOpacity(0.3),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            _hasProfile ? Icons.hearing_rounded : Icons.hearing_disabled,
-            color: _hasProfile ? const Color(0xFF4CAF50) : Colors.orange,
-            size: 24,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _hasProfile ? 'Hearing Profile Loaded' : 'No Hearing Profile',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
-                ),
-                Text(
-                  _hasProfile ? 'Gain: $_profileInfo' : 'Take a hearing test first',
-                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSoundAmplifierControls() {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E2139),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: Colors.white.withOpacity(0.05)),
-          ),
-          child: Column(
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Boost', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  Switch(
-                    value: _linkEars,
-                    onChanged: (val) => setState(() => _linkEars = val),
-                    activeColor: Colors.blueAccent,
-                  ),
-                ],
-              ),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildVerticalGainSlider('L', _leftBoost, Colors.blueAccent, (val) {
-                    setState(() { _leftBoost = val; if (_linkEars) _rightBoost = val; });
-                    _enhancement.setLeftGain(_leftBoost);
-                    if (_linkEars) _enhancement.setRightGain(_rightBoost);
-                  }),
-                  _buildVerticalGainSlider('R', _rightBoost, Colors.cyanAccent, (val) {
-                    setState(() { _rightBoost = val; if (_linkEars) _leftBoost = val; });
-                    _enhancement.setRightGain(_rightBoost);
-                    if (_linkEars) _enhancement.setLeftGain(_leftBoost);
-                  }),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        _buildControlCard(
-          icon: Icons.volume_up_rounded,
-          label: 'Master Volume',
-          child: Slider(
-            value: _masterVolume,
-            min: 0.0,
-            max: 5.0,
-            onChanged: (val) { setState(() => _masterVolume = val); _enhancement.setMasterVolume(val); },
-            activeColor: Colors.deepOrangeAccent,
-          ),
-        ),
-        const SizedBox(height: 20),
-        _buildControlCard(
-          icon: Icons.tune_rounded,
-          label: 'Fine-tuning',
-          child: Slider(
-            value: _tone,
-            onChanged: (val) { setState(() => _tone = val); _enhancement.setTone(val); },
-            activeColor: Colors.indigoAccent,
-          ),
-        ),
-        const SizedBox(height: 20),
-        _buildControlCard(
-          icon: Icons.waves_rounded,
-          label: 'Noise reduction',
-          child: Slider(
-            value: _suppressionLevel,
-            onChanged: (val) { setState(() => _suppressionLevel = val); _enhancement.setSuppression(val); },
-            activeColor: const Color(0xFF4CAF50),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildVerticalGainSlider(String label, double value, Color color, ValueChanged<double> onChanged) {
-    return Column(
-      children: [
-        SizedBox(
-          height: 160,
-          child: RotatedBox( quarterTurns: 3, child: Slider(value: value, min: 0.0, max: 10.0, activeColor: color, onChanged: onChanged)),
-        ),
-        Text(label, style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-      ],
-    );
-  }
-
-  Widget _buildControlCard({required IconData icon, required String label, required Widget child}) {
+  Widget _buildCompactDiagnosticHeader() {
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: const Color(0xFF1E2139), borderRadius: BorderRadius.circular(24)),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.03)),
+      ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(children: [Icon(icon, color: Colors.blueAccent, size: 20), const SizedBox(width: 12), Text(label, style: const TextStyle(color: Colors.white, fontSize: 14))]),
-          child,
+          Row(
+            children: [
+              Icon(
+                _hasProfile ? Icons.verified_user_rounded : Icons.info_outline_rounded,
+                color: _hasProfile ? const Color(0xFF4CAF50) : Colors.orange,
+                size: 16,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                _hasProfile ? 'Clinical Profile: Active' : 'Profile: Uncalibrated',
+                style: TextStyle(
+                  color: _hasProfile ? const Color(0xFF4CAF50) : Colors.orange,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const Spacer(),
+              if (_hasProfile)
+                Text(
+                  _profileInfo,
+                  style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10, fontWeight: FontWeight.bold),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _buildCompactMeter("IN", _inputLevel, Colors.cyanAccent),
+          const SizedBox(height: 12),
+          _buildCompactMeter("OUT", _outputLevel, const Color(0xFF6C63FF)),
         ],
       ),
     );
   }
 
-  Widget _buildEnhancementToggle() {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: const Color(0xFF1E2139), borderRadius: BorderRadius.circular(16)),
-          child: Row(
-            children: [
-              const Icon(Icons.auto_fix_high, color: Color(0xFF6C63FF)),
-              const SizedBox(width: 12),
-              const Expanded(child: Text('Live Enhancement', style: TextStyle(color: Colors.white))),
-              Switch(value: _enhancementOn, onChanged: (val) { setState(() => _enhancementOn = val); _enhancement.setEnabled(val); }, activeColor: const Color(0xFF6C63FF)),
-            ],
-          ),
-        ),
-        if (_enhancementOn) ...[
-          const SizedBox(height: 12),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+  Widget _buildUnifiedControlsCard() {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        children: [
+          // Boost Section (The vertical sliders)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
             child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                _buildModeTab('Profile', EnhancementMode.standard, Icons.hearing_rounded),
-                const SizedBox(width: 12),
-                _buildModeTab('DTLN', EnhancementMode.dtln, Icons.waves_rounded),
-                const SizedBox(width: 12),
-                _buildModeTab('RNN', EnhancementMode.rnn, Icons.record_voice_over_rounded),
+                const Text('Channel Boost', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                _buildLinkToggle(),
               ],
             ),
           ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _buildVerticalSlider('LEFT', _leftBoost, Colors.cyanAccent, (val) {
+                setState(() { _leftBoost = val; if (_linkEars) _rightBoost = val; });
+                _enhancement.setLeftGain(_leftBoost);
+                if (_linkEars) _enhancement.setRightGain(_rightBoost);
+              }),
+              _buildVerticalSlider('RIGHT', _rightBoost, const Color(0xFF6C63FF), (val) {
+                setState(() { _rightBoost = val; if (_linkEars) _leftBoost = val; });
+                _enhancement.setRightGain(_rightBoost);
+                if (_linkEars) _enhancement.setLeftGain(_leftBoost);
+              }),
+            ],
+          ),
+          
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 24),
+            child: Divider(color: Colors.white10),
+          ),
+          
+          // Sliders Section
+          _buildMasterSliderRow('Volume', _masterVolume, 0.0, 5.0, Icons.volume_up_rounded, const Color(0xFF4CAF50), (val) {
+            setState(() => _masterVolume = val);
+            _enhancement.setMasterVolume(val);
+          }),
+          _buildMasterSliderRow('Clarity', _tone, 0.0, 1.0, Icons.graphic_eq_rounded, Colors.orangeAccent, (val) {
+            setState(() => _tone = val);
+            _enhancement.setTone(val);
+          }),
+          _buildMasterSliderRow('Suppression', _suppressionLevel, 0.0, 1.0, Icons.waves_rounded, Colors.cyanAccent, (val) {
+            setState(() => _suppressionLevel = val);
+            _enhancement.setSuppression(val);
+          }),
+          const SizedBox(height: 16),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLinkToggle() {
+    return GestureDetector(
+      onTap: () => setState(() => _linkEars = !_linkEars),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: _linkEars ? const Color(0xFF6C63FF).withOpacity(0.1) : Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          children: [
+            Icon(_linkEars ? Icons.link_rounded : Icons.link_off_rounded, color: _linkEars ? const Color(0xFF6C63FF) : Colors.white24, size: 14),
+            const SizedBox(width: 6),
+            Text(
+              _linkEars ? 'LINKED' : 'INDEPENDENT',
+              style: TextStyle(color: _linkEars ? const Color(0xFF6C63FF) : Colors.white24, fontSize: 9, fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMasterSliderRow(String label, double value, double min, double max, IconData icon, Color color, ValueChanged<double> onChanged) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color.withOpacity(0.5), size: 14),
+              const SizedBox(width: 10),
+              Text(label, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              Text(
+                '${((value - min) / (max - min) * 100).toInt()}%',
+                style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 2,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+              activeTrackColor: color,
+              inactiveTrackColor: color.withOpacity(0.05),
+              thumbColor: Colors.white,
+              overlayColor: color.withOpacity(0.1),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+            ),
+            child: Slider(value: value, min: min, max: max, onChanged: onChanged),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactMeter(String label, double value, Color color) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 50,
+          child: Text(
+            label,
+            style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900),
+          ),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: value.clamp(0.0, 1.0),
+              backgroundColor: Colors.white.withOpacity(0.05),
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+              minHeight: 8,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 30,
+          child: Text(
+            '${(value * 100).toInt()}%',
+            textAlign: TextAlign.end,
+            style: TextStyle(color: color.withOpacity(0.8), fontSize: 10, fontWeight: FontWeight.bold),
+          ),
+        ),
       ],
     );
   }
 
-  Widget _buildModeTab(String label, EnhancementMode mode, IconData icon) {
+  Widget _buildMainActionButton() {
+    if (_isInitializing) return const Center(child: CircularProgressIndicator(color: Color(0xFF6C63FF)));
+    
+    if (!_hasHeadphones) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.redAccent.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: Colors.redAccent.withOpacity(0.2)),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.headset_off_rounded, color: Colors.redAccent),
+            SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                'Connect earbuds to start assist',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: _isRunning ? _stopAssist : _startAssist,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: _isRunning ? Colors.redAccent : const Color(0xFF6C63FF),
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: [
+            BoxShadow(
+              color: (_isRunning ? Colors.black : const Color(0xFF6C63FF)).withOpacity(_isRunning ? 0.2 : 0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              _isRunning ? Icons.stop_circle_rounded : Icons.play_circle_filled_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            Text(
+              _isRunning ? 'STOP ASSISTANCE' : 'START LIVE ASSIST',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEnhancementEngineCard() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.auto_awesome_rounded, color: Color(0xFF6C63FF), size: 20),
+              const SizedBox(width: 12),
+              const Text(
+                'AI Processing',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              const Spacer(),
+              Transform.scale(
+                scale: 0.8,
+                child: Switch(
+                  value: _enhancementOn,
+                  onChanged: (val) {
+                    setState(() => _enhancementOn = val);
+                    _enhancement.setEnabled(val);
+                  },
+                  activeColor: const Color(0xFF6C63FF),
+                ),
+              ),
+            ],
+          ),
+          if (_enhancementOn) ...[
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(child: _buildModeButton('STANDARD', EnhancementMode.standard)),
+                const SizedBox(width: 8),
+                Expanded(child: _buildModeButton('DTLN', EnhancementMode.dtln)),
+                const SizedBox(width: 8),
+                Expanded(child: _buildModeButton('RNN', EnhancementMode.rnn)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModeButton(String label, EnhancementMode mode) {
     final isSelected = _enhancement.mode == mode;
     return GestureDetector(
       onTap: () => setState(() => _enhancement.setMode(mode)),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        decoration: BoxDecoration(color: isSelected ? const Color(0xFF6C63FF) : const Color(0xFF1E2139), borderRadius: BorderRadius.circular(12)),
-        child: Row(children: [Icon(icon, size: 16, color: Colors.white), const SizedBox(width: 8), Text(label, style: const TextStyle(color: Colors.white))]),
-      ),
-    );
-  }
-
-  Widget _buildMainButton() {
-    if (_isInitializing) return const Center(child: CircularProgressIndicator());
-    if (!_hasHeadphones) return Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: Colors.red.withOpacity(0.1), borderRadius: BorderRadius.circular(12)), child: const Text('Connect headphones to begin', style: TextStyle(color: Colors.redAccent)));
-    
-    return SizedBox(
-      width: double.infinity,
-      height: 56,
-      child: ElevatedButton.icon(
-        onPressed: _isRunning ? _stopAssist : _startAssist,
-        icon: Icon(_isRunning ? Icons.stop_rounded : Icons.hearing_rounded),
-        label: Text(_isRunning ? 'Stop Assist' : 'Start Live Assist'),
-        style: ElevatedButton.styleFrom(backgroundColor: _isRunning ? Colors.redAccent : const Color(0xFF6C63FF), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF6C63FF).withOpacity(0.2) : Colors.white.withOpacity(0.03),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? const Color(0xFF6C63FF) : Colors.transparent,
+          ),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected ? const Color(0xFF6C63FF) : Colors.white24,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
       ),
     );
   }
 
   Widget _buildAshaIndicator() {
     return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-      child: const Row(children: [Icon(Icons.hearing, color: Colors.green, size: 16), SizedBox(width: 8), Text('Hearing Aid Connected', style: TextStyle(color: Colors.green, fontSize: 12))]),
-    );
-  }
-
-  Widget _buildMicSourceSelector() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: const Color(0xFF1E2139), borderRadius: BorderRadius.circular(16)),
-      child: Row(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF4CAF50).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF4CAF50).withOpacity(0.2)),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(_useEarbudMic ? Icons.bluetooth_audio : Icons.phone_android, color: const Color(0xFF6C63FF)),
-          const SizedBox(width: 12),
-          Expanded(child: Text('Use ${_useEarbudMic ? _earbudName : _phoneName}', style: const TextStyle(color: Colors.white))),
-          Switch(value: _useEarbudMic, onChanged: (val) => setState(() => _useEarbudMic = val), activeColor: const Color(0xFF6C63FF)),
+          Icon(Icons.hearing_rounded, color: Color(0xFF4CAF50), size: 18),
+          SizedBox(width: 12),
+          Text(
+            'HEARING AID ACTIVE',
+            style: TextStyle(color: Color(0xFF4CAF50), fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 1),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildCaptionOverlay() {
+    final screenHeight = MediaQuery.of(context).size.height;
+    final expandedHeight = screenHeight / 3;
+    
+    String placeholder = _isCaptionLoading ? 'Setting up Whisper...' : 'Listening...';
     final displayText = _captionText.isNotEmpty || _partialText.isNotEmpty
         ? '$_captionText${_captionText.isNotEmpty && _partialText.isNotEmpty ? '\n' : ''}$_partialText'
-        : 'Listening...';
+        : placeholder;
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
       width: double.infinity,
-      constraints: const BoxConstraints(maxHeight: 150),
+      height: _isCaptionCollapsed ? 80 : expandedHeight,
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.85),
-        border: Border(
-          top: BorderSide(color: const Color(0xFF6C63FF).withOpacity(0.4), width: 1),
-        ),
+        color: const Color(0xFF0D1117).withOpacity(0.98),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 40, offset: const Offset(0, -10)),
+        ],
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          // Header / Controls
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 8, 4),
             child: Row(
               children: [
-                const Icon(Icons.closed_caption, color: Color(0xFF6C63FF), size: 16),
-                const SizedBox(width: 8),
-                const Text('Live Captions', style: TextStyle(color: Color(0xFF6C63FF), fontSize: 12, fontWeight: FontWeight.w600)),
-                const Spacer(),
-                if (_transcription.isListening)
-                  Container(
-                    width: 6, height: 6,
-                    decoration: const BoxDecoration(color: Color(0xFF4CAF50), shape: BoxShape.circle),
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(color: const Color(0xFF6C63FF).withOpacity(0.1), shape: BoxShape.circle),
+                  child: Icon(
+                    _isCaptionLoading ? Icons.sync_rounded : Icons.closed_caption_rounded, 
+                    color: const Color(0xFF6C63FF), 
+                    size: 14
                   ),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: () {
-                    setState(() {
-                      _captionHistory.clear();
-                      _captionText = '';
-                      _partialText = '';
-                    });
-                  },
-                  child: Icon(Icons.clear_all, color: Colors.white.withOpacity(0.5), size: 18),
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _isCaptionLoading ? 'PREPARING...' : 'LIVE CAPTIONS',
+                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 1),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                
+                if (!_isCaptionCollapsed) ...[
+                  _buildLanguageDropdown(),
+                  IconButton(
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      setState(() {
+                        _captionHistory.clear();
+                        _captionText = '';
+                        _partialText = '';
+                      });
+                    },
+                    icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white38, size: 20),
+                    tooltip: 'Clear',
+                  ),
+                ],
+                
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: () => setState(() => _isCaptionCollapsed = !_isCaptionCollapsed),
+                  icon: Icon(
+                    _isCaptionCollapsed ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+                    color: Colors.white60,
+                  ),
+                ),
+                
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  onPressed: _toggleCaptions,
+                  icon: const Icon(Icons.close_rounded, color: Colors.white24, size: 20),
+                ),
+                const SizedBox(width: 4),
               ],
             ),
           ),
-          // Caption text
-          Flexible(
-            child: SingleChildScrollView(
-              controller: _captionScrollController,
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              child: SizedBox(
-                width: double.infinity,
-                child: Text(
-                  displayText,
-                  style: TextStyle(
-                    color: _partialText.isNotEmpty && _captionText.isEmpty
-                        ? Colors.white.withOpacity(0.5)
-                        : Colors.white,
-                    fontSize: 15,
-                    height: 1.4,
+          
+          // Transcription Text Area
+          if (!_isCaptionCollapsed)
+            Flexible(
+              child: SingleChildScrollView(
+                controller: _captionScrollController,
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Text(
+                    displayText,
+                    style: TextStyle(
+                      color: (_captionText.isEmpty && _partialText.isEmpty) || _isCaptionLoading
+                          ? Colors.white.withOpacity(0.3)
+                          : Colors.white.withOpacity(0.9),
+                      fontSize: 16,
+                      height: 1.6,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
   }
 
-  void _showSnackBar(String msg, Color color) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: color, behavior: SnackBarBehavior.floating));
+  Widget _buildSectionTitle(String title) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        title,
+        style: TextStyle(
+          color: Colors.white.withOpacity(0.3),
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVerticalSlider(String label, double value, Color color, ValueChanged<double> onChanged) {
+    return Column(
+      children: [
+        Container(
+          height: 180,
+          width: 60,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.02),
+            borderRadius: BorderRadius.circular(30),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Expanded(
+                child: RotatedBox(
+                  quarterTurns: 3,
+                  child: SliderTheme(
+                    data: SliderThemeData(
+                      trackHeight: 4,
+                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                      activeTrackColor: color,
+                      inactiveTrackColor: color.withOpacity(0.1),
+                      thumbColor: Colors.white,
+                      overlayColor: color.withOpacity(0.1),
+                    ),
+                    child: Slider(value: value, min: 0.0, max: 10.0, onChanged: onChanged),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          label,
+          style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 9, fontWeight: FontWeight.w900),
+        ),
+        Text(
+          value.toStringAsFixed(1),
+          style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLanguageDropdown() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: _selectedLang,
+          dropdownColor: const Color(0xFF131932),
+          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: Colors.white24),
+          style: const TextStyle(color: Color(0xFF6C63FF), fontSize: 11, fontWeight: FontWeight.bold),
+          onChanged: (String? newValue) {
+            if (newValue != null) {
+              setState(() => _selectedLang = newValue);
+              if (_isRunning) {
+                _stopCaptionPipeline();
+                _startCaptionPipeline();
+              }
+            }
+          },
+          items: TranscriptionService.supportedLanguages.entries.map((e) {
+            return DropdownMenuItem<String>(
+              value: e.key,
+              child: Text(e.value.toUpperCase()),
+            );
+          }).toList(),
+        ),
+      ),
+    );
   }
 }

@@ -16,7 +16,7 @@ class HearingTestScreen extends StatefulWidget {
 class _HearingTestScreenState extends State<HearingTestScreen> with SingleTickerProviderStateMixin {
   final AudioPlayer _player = AudioPlayer();
   final List<int> _frequencies = [
-    125, 250, 375, 500, 750, 1000, 1500, 2000, 3000, 4000, 6000, 7000, 8000
+    250, 500, 1000, 2000, 4000, 8000
   ];
 
   int _currentIndex = 0;
@@ -85,21 +85,27 @@ class _HearingTestScreenState extends State<HearingTestScreen> with SingleTicker
   }
 
   Future<void> _nextStep() async {
-    if (_currentEar == "left") {
-      setState(() => _currentEar = "right");
+    if (_currentIndex < _frequencies.length - 1) {
+      // Still more frequencies for the current ear
+      setState(() {
+        _currentIndex++;
+      });
     } else {
-      if (_currentIndex < _frequencies.length - 1) {
+      // Finished all frequencies for the current ear
+      if (_currentEar == "left") {
+        // Switch to the right ear and reset frequency index
         setState(() {
-          _currentEar = "left";
-          _currentIndex++;
+          _currentEar = "right";
+          _currentIndex = 0;
         });
       } else {
+        // Finished both ears
         setState(() => _finished = true);
         await _saveProfile();
         return;
       }
     }
-
+    
     _volume = 0.3;
     await _playTone();
   }
@@ -148,7 +154,10 @@ class _HearingTestScreenState extends State<HearingTestScreen> with SingleTicker
     }
   }
 
-  double get _progress => (_currentIndex * 2 + (_currentEar == "right" ? 1 : 0)) / (_frequencies.length * 2);
+  double get _progress {
+    int currentStep = (_currentEar == "left" ? 0 : _frequencies.length) + _currentIndex;
+    return currentStep / (_frequencies.length * 2);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -184,14 +193,19 @@ class _HearingTestScreenState extends State<HearingTestScreen> with SingleTicker
         backgroundColor: Colors.transparent,
         elevation: 0,
         title: const Text(
-          "Hearing Test",
+          "HEARING TEST",
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
             color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+            letterSpacing: 2,
           ),
         ),
         centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
       ),
       body: SafeArea(
         child: !_testing ? _buildStartScreen() : _buildTestScreen(),

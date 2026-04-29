@@ -85,8 +85,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           children: [
             const SizedBox(height: 20),
             _buildWelcomeHeader(),
-            const SizedBox(height: 30),
-            _buildProfileStatus(),
             const SizedBox(height: 40),
             _buildLiveAssistAction(),
             const SizedBox(height: 30),
@@ -98,101 +96,62 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   }
 
   Widget _buildWelcomeHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          "HearWise",
-          style: TextStyle(
-            fontSize: 32,
-            fontWeight: FontWeight.w800,
-            color: Colors.white,
-            letterSpacing: -0.5,
-          ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "HEARWISE",
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                color: Colors.white,
+                letterSpacing: 2,
+              ),
+            ),
+            Text(
+              "Empowering your sound experience",
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withOpacity(0.5),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 8),
-        Text(
-          "Personalized Hearing Assistance",
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.white.withOpacity(0.5),
-            fontWeight: FontWeight.w400,
-          ),
-        ),
+        _buildCompactProfileStatus(),
       ],
     );
   }
 
-  Widget _buildProfileStatus() {
+  Widget _buildCompactProfileStatus() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFF1E2139),
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white.withOpacity(0.05)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black26,
-            blurRadius: 15,
-            offset: const Offset(0, 8),
-          ),
-        ],
       ),
-      child: Column(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: _profileLoaded ? Colors.greenAccent.withOpacity(0.1) : Colors.orangeAccent.withOpacity(0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  _profileLoaded ? Icons.verified : Icons.warning_amber_rounded,
-                  color: _profileLoaded ? Colors.greenAccent : Colors.orangeAccent,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _profileLoaded ? "Hearing Profile Ready" : "Profile Incomplete",
-                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _profileInfo,
-                    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
-                  ),
-                ],
-              ),
-            ],
+          Icon(
+            _profileLoaded ? Icons.verified : Icons.warning_amber_rounded,
+            color: _profileLoaded ? Colors.greenAccent : Colors.orangeAccent,
+            size: 14,
           ),
-          if (!_profileLoaded) ...[
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: () {
-                  if (_userId != null) {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => HearingTestScreen(userId: _userId!)));
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User session not found')));
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF6C63FF),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                child: const Text("Take Hearing Test", style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
+          const SizedBox(width: 8),
+          Text(
+            _profileLoaded ? "CALIBRATED" : "NOT TESTED",
+            style: TextStyle(
+              color: _profileLoaded ? Colors.greenAccent : Colors.orangeAccent,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1,
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -264,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _buildActionCard(
               "Test Hearing",
               Icons.speed,
-              () {
+                  () {
                 if (_userId != null) {
                   Navigator.push(context, MaterialPageRoute(builder: (_) => HearingTestScreen(userId: _userId!)));
                 } else {
@@ -276,7 +235,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _buildActionCard(
               "Live Caption",
               Icons.subtitles_rounded,
-              () {
+                  () {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const TranscriptionScreen()));
               },
             ),
@@ -288,7 +247,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _buildActionCard(
               "History",
               Icons.history_rounded,
-              () {
+                  () {
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const ConversationHistoryScreen()));
               },
             ),
@@ -296,7 +255,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             _buildActionCard(
               "AI Settings",
               Icons.tune,
-              () {
+                  () {
                 // Placeholder
               },
             ),

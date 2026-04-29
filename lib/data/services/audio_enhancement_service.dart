@@ -48,7 +48,7 @@ class AudioEnhancementService {
   double _suppressionLevel = 0.5;
 
   final List<int> _testFrequencies = [
-    125, 250, 375, 500, 750, 1000, 1500, 2000, 3000, 4000, 6000, 7000, 8000
+    250, 500, 1000, 2000, 4000, 8000
   ];
 
   static const double maxBoostDb = 12.0;
@@ -87,14 +87,24 @@ class AudioEnhancementService {
     final freqMap = profile['frequencyMap'] as Map<String, dynamic>?;
     if (freqMap == null) return;
 
+    // The native engine expects 13 bands. We map our 6 clinical bands to them.
+    final List<int> nativeFreqs = [125, 250, 375, 500, 750, 1000, 1500, 2000, 3000, 4000, 6000, 7000, 8000];
     final List<double> nativeGains = List.filled(13, 0.0);
-    for (int i = 0; i < _testFrequencies.length; i++) {
-      final freq = _testFrequencies[i];
-      final leftVal = (freqMap['L_$freq'] as num?)?.toDouble() ?? 1.0;
-      final rightVal = (freqMap['R_$freq'] as num?)?.toDouble() ?? 1.0;
+
+    for (int i = 0; i < nativeFreqs.length; i++) {
+      int targetFreq = nativeFreqs[i];
+      
+      // Find the closest available clinical frequency
+      int closestFreq = _testFrequencies.reduce((a, b) => 
+        (a - targetFreq).abs() < (b - targetFreq).abs() ? a : b);
+
+      final leftVal = (freqMap['L_$closestFreq'] as num?)?.toDouble() ?? 1.0;
+      final rightVal = (freqMap['R_$closestFreq'] as num?)?.toDouble() ?? 1.0;
+      
       final avgLoss = 1.0 - ((leftVal + rightVal) / 2.0).clamp(0.0, 1.0);
       nativeGains[i] = avgLoss * maxBoostDb;
     }
+    
     NativeAudioApi.updateEq(nativeGains);
   }
 
