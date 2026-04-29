@@ -254,6 +254,7 @@ class TranscriptionService {
         enableAutomaticPunctuation: true,
         sampleRateHertz: 16000,
         languageCode: localeId,
+        alternativeLanguageCodes: alternativeLocales,
       );
 
       final streamingConfig = StreamingRecognitionConfig(

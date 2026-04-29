@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../../data/services/audio_enhancement_service.dart';
 import '../../data/services/native_audio_api.dart';
 import '../../data/services/HearingProfileService.dart';
+import '../../data/services/transcription_service.dart';
 
 class LiveAssistScreen extends StatefulWidget {
   const LiveAssistScreen({super.key});
@@ -42,6 +43,16 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
   double _suppressionLevel = 0.5;
   bool _linkEars = true;
 
+  // ── Live Caption State ──
+  final TranscriptionService _transcription = TranscriptionService();
+  bool _showCaptions = false;
+  String _selectedLang = 'auto'; // Default to auto-detect
+  String _captionText = '';
+  String _partialText = '';
+  final List<String> _captionHistory = [];
+  final ScrollController _captionScrollController = ScrollController();
+  Timer? _captionTimer;
+
   late AnimationController _pulseController;
   Timer? _levelTimer;
 
@@ -53,6 +64,69 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
       duration: const Duration(milliseconds: 1500),
     );
     _initialize();
+  }
+
+  void _startCaptionPipeline() {
+    _transcription.startListening(
+      onPartial: (text) {
+        if (!mounted) return;
+        setState(() => _partialText = text);
+        _scrollCaptionsToBottom();
+      },
+      onResult: (text) {
+        if (!mounted || text.isEmpty) return;
+        setState(() {
+          _captionHistory.add(text);
+          if (_captionHistory.length > 20) _captionHistory.removeAt(0);
+          _captionText = _captionHistory.join('\n');
+          _partialText = '';
+        });
+        _scrollCaptionsToBottom();
+      },
+      onStatusChanged: (status) => debugPrint('🎤 Caption: $status'),
+      language: _selectedLang,
+      useExternalSource: true,
+    );
+
+    // Poll processed audio from C++ every 100ms and feed to Vosk
+    _captionTimer?.cancel();
+    _captionTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      final bytes = NativeAudioApi.pullCaptionPcm16();
+      if (bytes != null && bytes.isNotEmpty) {
+        _transcription.feedAudioBytes(bytes);
+      }
+    });
+    debugPrint('✅ Caption pipeline started (processed audio → Vosk)');
+  }
+
+  void _stopCaptionPipeline() {
+    _captionTimer?.cancel();
+    _captionTimer = null;
+    _transcription.stopListening();
+    debugPrint('⏹️ Caption pipeline stopped');
+  }
+
+  void _toggleCaptions() {
+    setState(() => _showCaptions = !_showCaptions);
+    if (_showCaptions && _isRunning) {
+      _startCaptionPipeline();
+      _showSnackBar('Live Captions ON', const Color(0xFF6C63FF));
+    } else {
+      _stopCaptionPipeline();
+      _showSnackBar('Live Captions OFF', Colors.grey);
+    }
+  }
+
+  void _scrollCaptionsToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_captionScrollController.hasClients) {
+        _captionScrollController.animateTo(
+          _captionScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   Future<void> _initialize() async {
@@ -141,6 +215,8 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
         _startLevelTimer();
         _pulseController.repeat(reverse: true);
         _showSnackBar("Live Assist Started", const Color(0xFF4CAF50));
+        // Auto-start captions if toggle is on
+        if (_showCaptions) _startCaptionPipeline();
       } else {
         _showSnackBar("Microphone access denied", Colors.redAccent);
       }
@@ -154,10 +230,13 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
       NativeAudioApi.stopAudio();
       _levelTimer?.cancel();
       _pulseController.stop();
+      // Stop captions when audio stops
+      _stopCaptionPipeline();
       setState(() {
         _isRunning = false;
         _inputLevel = 0;
         _outputLevel = 0;
+        _partialText = '';
       });
     } catch (e) {
       debugPrint("Stop Error: $e");
@@ -179,10 +258,12 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
   @override
   void dispose() {
     _stopAssist();
+    _stopCaptionPipeline();
     _devicesSub?.cancel();
     _pulseController.dispose();
     _enhancement.dispose();
     _levelTimer?.cancel();
+    _captionScrollController.dispose();
     super.dispose();
   }
 
@@ -196,41 +277,90 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
         title: const Text("Sound Amplifier",
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
         centerTitle: true,
+        actions: [
+          // Language selector (visible when captions on or audio running)
+          if (_isRunning)
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: DropdownButton<String>(
+                value: _selectedLang,
+                dropdownColor: const Color(0xFF1E2139),
+                underline: const SizedBox(),
+                icon: const Icon(Icons.language_rounded, size: 16, color: Colors.blueAccent),
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+                items: TranscriptionService.supportedLanguages.entries
+                    .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _selectedLang = val);
+                    if (_showCaptions && _isRunning) {
+                      _stopCaptionPipeline();
+                      _startCaptionPipeline();
+                    }
+                  }
+                },
+              ),
+            ),
+          IconButton(
+            onPressed: _isRunning ? _toggleCaptions : null,
+            icon: Icon(
+              _showCaptions ? Icons.closed_caption : Icons.closed_caption_off,
+              color: _showCaptions ? const Color(0xFF6C63FF) : Colors.white.withOpacity(_isRunning ? 0.7 : 0.3),
+            ),
+            tooltip: 'Live Captions',
+          ),
+        ],
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              _buildProfileCard(),
-              const SizedBox(height: 24),
-              _buildLevelMeters(),
-              const SizedBox(height: 24),
-              _buildEnhancementToggle(),
-              const SizedBox(height: 20),
-              _buildMainButton(),
-              const SizedBox(height: 12),
-              Text(
-                _isRunning
-                    ? 'Audio is being enhanced in real-time'
-                    : 'Tap Start to begin hearing assistance',
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.4),
-                  fontSize: 12,
+        child: Column(
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    _buildProfileCard(),
+                    const SizedBox(height: 24),
+                    _buildLevelMeters(),
+                    const SizedBox(height: 24),
+                    _buildEnhancementToggle(),
+                    const SizedBox(height: 20),
+                    _buildMainButton(),
+                    const SizedBox(height: 12),
+                    Text(
+                      _isRunning
+                          ? 'Audio is being enhanced in real-time'
+                          : 'Tap Start to begin hearing assistance',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.4),
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildSoundAmplifierControls(),
+                    if (_isHearingAid) ...[
+                      const SizedBox(height: 12),
+                      _buildAshaIndicator(),
+                    ],
+                    if (_hasHeadphones && !_isHearingAid) ...[
+                      const SizedBox(height: 12),
+                      _buildMicSourceSelector(),
+                    ],
+                    // Add bottom padding when captions are visible
+                    if (_showCaptions) const SizedBox(height: 160),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-              _buildSoundAmplifierControls(),
-              if (_isHearingAid) ...[
-                const SizedBox(height: 12),
-                _buildAshaIndicator(),
-              ],
-              if (_hasHeadphones && !_isHearingAid) ...[
-                const SizedBox(height: 12),
-                _buildMicSourceSelector(),
-              ],
-            ],
-          ),
+            ),
+            // Floating Caption Bar
+            if (_showCaptions && _isRunning) _buildCaptionOverlay(),
+          ],
         ),
       ),
     );
@@ -492,6 +622,76 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
           const SizedBox(width: 12),
           Expanded(child: Text('Use ${_useEarbudMic ? _earbudName : _phoneName}', style: const TextStyle(color: Colors.white))),
           Switch(value: _useEarbudMic, onChanged: (val) => setState(() => _useEarbudMic = val), activeColor: const Color(0xFF6C63FF)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCaptionOverlay() {
+    final displayText = _captionText.isNotEmpty || _partialText.isNotEmpty
+        ? '$_captionText${_captionText.isNotEmpty && _partialText.isNotEmpty ? '\n' : ''}$_partialText'
+        : 'Listening...';
+
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(maxHeight: 150),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.85),
+        border: Border(
+          top: BorderSide(color: const Color(0xFF6C63FF).withOpacity(0.4), width: 1),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                const Icon(Icons.closed_caption, color: Color(0xFF6C63FF), size: 16),
+                const SizedBox(width: 8),
+                const Text('Live Captions', style: TextStyle(color: Color(0xFF6C63FF), fontSize: 12, fontWeight: FontWeight.w600)),
+                const Spacer(),
+                if (_transcription.isListening)
+                  Container(
+                    width: 6, height: 6,
+                    decoration: const BoxDecoration(color: Color(0xFF4CAF50), shape: BoxShape.circle),
+                  ),
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _captionHistory.clear();
+                      _captionText = '';
+                      _partialText = '';
+                    });
+                  },
+                  child: Icon(Icons.clear_all, color: Colors.white.withOpacity(0.5), size: 18),
+                ),
+              ],
+            ),
+          ),
+          // Caption text
+          Flexible(
+            child: SingleChildScrollView(
+              controller: _captionScrollController,
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: SizedBox(
+                width: double.infinity,
+                child: Text(
+                  displayText,
+                  style: TextStyle(
+                    color: _partialText.isNotEmpty && _captionText.isEmpty
+                        ? Colors.white.withOpacity(0.5)
+                        : Colors.white,
+                    fontSize: 15,
+                    height: 1.4,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

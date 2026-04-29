@@ -53,8 +53,11 @@ bool AudioEngine::start() {
     mReadIndex = 0;
     mWriteIndex = 0;
     mDenoiseIndex = 0;
+    mCaptionReadIndex = 0;
+    mCaptionWriteIndex = 0;
     memset(mRingBuffer, 0, sizeof(mRingBuffer));
     memset(mDenoiseBuffer, 0, sizeof(mDenoiseBuffer));
+    memset(mCaptionBuffer, 0, sizeof(mCaptionBuffer));
 
     float sampleRate = mOutputStream->getSampleRate();
     mEQProcessor = std::make_unique<MultiBandEQ>(sampleRate);
@@ -224,6 +227,10 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
         float right = sample;
         mGainProcessor->process(left, right);
 
+        // Copy mono mix to caption buffer for STT
+        float mono = (left + right) * 0.5f;
+        writeToCaptionBuffer(mono);
+
         float peak = std::max(fabsf(left), fabsf(right));
         if (peak > maxOutPeak) maxOutPeak = peak;
 
@@ -239,4 +246,23 @@ oboe::DataCallbackResult AudioEngine::onAudioReady(
     mOutputLevel = mOutputLevel * 0.8f + maxOutPeak * 0.2f;
 
     return oboe::DataCallbackResult::Continue;
+}
+
+void AudioEngine::writeToCaptionBuffer(float sample) {
+    mCaptionBuffer[mCaptionWriteIndex] = sample;
+    mCaptionWriteIndex = (mCaptionWriteIndex + 1) % kCaptionCapacity;
+}
+
+int AudioEngine::getCaptionAvailable() {
+    return (mCaptionWriteIndex - mCaptionReadIndex + kCaptionCapacity) % kCaptionCapacity;
+}
+
+int AudioEngine::getCaptionData(float* out, int maxFrames) {
+    int available = getCaptionAvailable();
+    int toRead = std::min(maxFrames, available);
+    for (int i = 0; i < toRead; ++i) {
+        out[i] = mCaptionBuffer[mCaptionReadIndex];
+        mCaptionReadIndex = (mCaptionReadIndex + 1) % kCaptionCapacity;
+    }
+    return toRead;
 }

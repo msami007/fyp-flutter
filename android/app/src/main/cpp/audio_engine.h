@@ -31,6 +31,10 @@ public:
     float getInputLevel() { return mInputLevel.load(); }
     float getOutputLevel() { return mOutputLevel.load(); }
 
+    // Caption audio capture (for STT)
+    int getCaptionData(float* out, int maxFrames);
+    int getCaptionAvailable();
+
     // Oboe callback
     oboe::DataCallbackResult onAudioReady(
         oboe::AudioStream *audioStream,
@@ -76,6 +80,13 @@ private:
     
     void writeToBuffer(const float* data, int numFrames);
     int readFromBuffer(float* data, int numFrames);
+
+    // Caption ring buffer (processed output for STT)
+    static const int kCaptionCapacity = 48000; // ~1s at 48kHz
+    float mCaptionBuffer[kCaptionCapacity];
+    int mCaptionReadIndex = 0;
+    int mCaptionWriteIndex = 0;
+    void writeToCaptionBuffer(float sample);
 };
 
 #endif // AUDIO_ENGINE_H

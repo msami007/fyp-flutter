@@ -72,4 +72,14 @@ float get_output_level() {
     return gEngine ? gEngine->getOutputLevel() : 0.0f;
 }
 
+__attribute__((visibility("default"))) __attribute__((used))
+int get_caption_data(float* out, int maxFrames) {
+    return gEngine ? gEngine->getCaptionData(out, maxFrames) : 0;
+}
+
+__attribute__((visibility("default"))) __attribute__((used))
+int get_caption_available() {
+    return gEngine ? gEngine->getCaptionAvailable() : 0;
+}
+
 }
