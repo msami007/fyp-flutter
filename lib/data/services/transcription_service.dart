@@ -55,7 +55,6 @@ class TranscriptionService {
   static const Map<String, String> supportedLanguages = {
     'en': 'English',
     'ur': 'Urdu',
-    'auto': 'Auto-Detect',
   };
 
   /// Locale IDs for cloud speech

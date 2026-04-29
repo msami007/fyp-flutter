@@ -91,16 +91,20 @@ class _HearingResultScreenState extends State<HearingResultScreen> with SingleTi
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        // Close button removed from here
         title: const Text(
-          "Your Hearing Profile",
+          "HEARING PROFILE",
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
             color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+            letterSpacing: 2,
           ),
         ),
         centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
       ),
       body: SafeArea(
         child: FadeTransition(
@@ -164,6 +168,13 @@ class _HearingResultScreenState extends State<HearingResultScreen> with SingleTi
 
               const SizedBox(height: 32),
 
+              // ── Audiogram Graph Section ──
+              _buildSectionTitle("Audiogram Visualization"),
+              const SizedBox(height: 16),
+              _buildAudiogramGraph(),
+
+              const SizedBox(height: 32),
+
               // Ear comparison cards
               Row(
                 children: [
@@ -215,6 +226,9 @@ class _HearingResultScreenState extends State<HearingResultScreen> with SingleTi
                   });
                 },
               ),
+
+              const SizedBox(height: 32),
+
 
               const SizedBox(height: 24),
 
@@ -477,4 +491,130 @@ class _HearingResultScreenState extends State<HearingResultScreen> with SingleTi
       ),
     );
   }
+
+  Widget _buildSectionTitle(String title) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        title.toUpperCase(),
+        style: const TextStyle(
+          color: Colors.white54,
+          fontSize: 12,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 1.5,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAudiogramGraph() {
+    final leftData = _getLeftEarData();
+    final rightData = _getRightEarData();
+
+    return Container(
+      height: 300,
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2139),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: CustomPaint(
+        painter: AudiogramPainter(
+          leftPoints: leftData.map((e) => e.value).toList(),
+          rightPoints: rightData.map((e) => e.value).toList(),
+          frequencies: leftData.map((e) => e.key).toList(),
+        ),
+      ),
+    );
+  }
+}
+
+class AudiogramPainter extends CustomPainter {
+  final List<double> leftPoints;
+  final List<double> rightPoints;
+  final List<String> frequencies;
+
+  AudiogramPainter({
+    required this.leftPoints,
+    required this.rightPoints,
+    required this.frequencies,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paintGrid = Paint()
+      ..color = Colors.white.withOpacity(0.05)
+      ..strokeWidth = 1;
+
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+    );
+
+    // Draw Grid and Labels
+    final double colWidth = size.width / (frequencies.isEmpty ? 1 : frequencies.length - 1);
+    final double rowHeight = size.height / 5;
+
+    for (int i = 0; i < frequencies.length; i++) {
+      double x = i * colWidth;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paintGrid);
+      
+      // Freq labels
+      textPainter.text = TextSpan(
+        text: frequencies[i],
+        style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 10, fontWeight: FontWeight.bold),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(x - textPainter.width / 2, size.height + 8));
+    }
+
+    for (int i = 0; i <= 5; i++) {
+      double y = i * rowHeight;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paintGrid);
+    }
+
+    // Draw Lines
+    _drawDataLine(canvas, size, leftPoints, const Color(0xFF6C63FF), true);
+    _drawDataLine(canvas, size, rightPoints, const Color(0xFF2196F3), false);
+  }
+
+  void _drawDataLine(Canvas canvas, Size size, List<double> points, Color color, bool isLeft) {
+    if (points.isEmpty) return;
+
+    final paintLine = Paint()
+      ..color = color
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final paintPoint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final path = Path();
+    final double colWidth = size.width / (points.length - 1);
+
+    for (int i = 0; i < points.length; i++) {
+      // Invert Y because lower gain means more loss (clinically 0 is top)
+      // Here 0 is 0 gain, 1 is max gain.
+      double y = (1 - points[i]) * size.height;
+      double x = i * colWidth;
+
+      if (i == 0) {
+        path.moveTo(x, y);
+      } else {
+        path.lineTo(x, y);
+      }
+
+      // Draw markers
+      canvas.drawCircle(Offset(x, y), 5, paintPoint);
+      canvas.drawCircle(Offset(x, y), 8, Paint()..color = color.withOpacity(0.2)..style = PaintingStyle.fill);
+    }
+
+    canvas.drawPath(path, paintLine);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

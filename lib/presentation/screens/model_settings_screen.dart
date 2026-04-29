@@ -106,15 +106,20 @@ class _ModelSettingsScreenState extends State<ModelSettingsScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.model_training, color: Color(0xFF6C63FF), size: 24),
-            const SizedBox(width: 12),
-            const Text("AI Models", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600, color: Colors.white)),
-          ],
+        title: const Text(
+          "AI MODELS",
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+            letterSpacing: 2,
+          ),
         ),
         centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
       ),
       body: SafeArea(
         child: _isLoading

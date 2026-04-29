@@ -109,27 +109,20 @@ class _ConnectDeviceScreenState extends State<ConnectDeviceScreen> with WidgetsB
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.volume_up_rounded,
-              color: const Color(0xFF6C63FF),
-              size: 24,
-            ),
-            const SizedBox(width: 12),
-            const Text(
-              "Audio Output",
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+        title: const Text(
+          "AUDIO OUTPUT",
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w900,
+            fontSize: 16,
+            letterSpacing: 2,
+          ),
         ),
         centerTitle: true,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
         actions: [
           Container(
             margin: const EdgeInsets.only(right: 8),

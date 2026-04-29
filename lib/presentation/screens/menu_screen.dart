@@ -84,76 +84,248 @@ class _MenuScreenState extends State<MenuScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0E27),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E2139),
-        title: const Text('Menu'),
+        backgroundColor: Colors.transparent,
         elevation: 0,
+        leading: IconButton(
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+        ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: [
-          ListTile(
-            leading: const Icon(Icons.person_outline_rounded, color: Colors.white),
-            title: const Text('Profile Account', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('View account details', style: TextStyle(color: Colors.white70)),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileAccountScreen())),
+      extendBodyBehindAppBar: true,
+      body: SafeArea(
+        child: SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildMenuHeader(),
+              const SizedBox(height: 48),
+              
+              _buildSectionTitle('ACCOUNT & HEARING'),
+              const SizedBox(height: 16),
+              _buildMenuCard([
+                _buildMenuRow(
+                  icon: Icons.person_outline_rounded,
+                  title: 'Profile Account',
+                  subtitle: 'Manage your personal details',
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileAccountScreen())),
+                ),
+                _buildMenuDivider(),
+                _buildMenuRow(
+                  icon: Icons.hearing_outlined,
+                  title: 'Hearing Profile',
+                  subtitle: 'View your optimization stats',
+                  onTap: _viewHearingProfile,
+                ),
+                _buildMenuDivider(),
+                _buildMenuRow(
+                  icon: Icons.replay_rounded,
+                  title: 'Re-take Hearing Test',
+                  subtitle: 'Calibrate your audio profile',
+                  onTap: _takeHearingProfileAgain,
+                ),
+              ]),
+              
+              const SizedBox(height: 32),
+              _buildSectionTitle('CORE FEATURES'),
+              const SizedBox(height: 16),
+              _buildMenuCard([
+                _buildMenuRow(
+                  icon: Icons.subtitles_rounded,
+                  title: 'Live Caption',
+                  subtitle: 'Real-time speech to text',
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TranscriptionScreen())),
+                ),
+                _buildMenuDivider(),
+                _buildMenuRow(
+                  icon: Icons.history_rounded,
+                  title: 'Conversation History',
+                  subtitle: 'Your saved transcripts',
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ConversationHistoryScreen())),
+                ),
+                _buildMenuDivider(),
+                _buildMenuRow(
+                  icon: Icons.bluetooth_rounded,
+                  title: 'Connect Devices',
+                  subtitle: 'Pair hearing aids or earbuds',
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ConnectDeviceScreen())),
+                ),
+              ]),
+              
+              const SizedBox(height: 40),
+              _buildLogoutButton(),
+              const SizedBox(height: 40),
+            ],
           ),
-          const Divider(color: Colors.white10),
-          ListTile(
-            leading: const Icon(Icons.hearing_outlined, color: Colors.white),
-            title: const Text('Hearing Profile', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('View saved hearing profile', style: TextStyle(color: Colors.white70)),
-            onTap: _viewHearingProfile,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuHeader() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 4,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF6C63FF),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 16),
+            const Text(
+              'Menu & Settings',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.only(left: 20),
+          child: Text(
+            'Personalize your hearing and transcription experience',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.4),
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
           ),
-          const Divider(color: Colors.white10),
-          ListTile(
-            leading: const Icon(Icons.replay_outlined, color: Colors.white),
-            title: const Text('Take Hearing Profile Again', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Re-run the hearing test', style: TextStyle(color: Colors.white70)),
-            onTap: _takeHearingProfileAgain,
-          ),
-          const Divider(color: Colors.white10),
-          ListTile(
-            leading: const Icon(Icons.subtitles_outlined, color: Colors.white),
-            title: const Text('Live Caption', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Start real-time transcription', style: TextStyle(color: Colors.white70)),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TranscriptionScreen())),
-          ),
-          const Divider(color: Colors.white10),
-          ListTile(
-            leading: const Icon(Icons.history_rounded, color: Colors.white),
-            title: const Text('Conversation History', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('View saved transcripts', style: TextStyle(color: Colors.white70)),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ConversationHistoryScreen())),
-          ),
-          const Divider(color: Colors.white10),
-          ListTile(
-            leading: const Icon(Icons.bluetooth_rounded, color: Colors.white),
-            title: const Text('Connect Devices', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Pair hearing aids or earbuds', style: TextStyle(color: Colors.white70)),
-            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ConnectDeviceScreen())),
-          ),
-          const Divider(color: Colors.white10),
-          
-          ListTile(
-            leading: const Icon(Icons.logout, color: Colors.white),
-            title: const Text('Logout', style: TextStyle(color: Colors.white)),
-            subtitle: const Text('Sign out of your account', style: TextStyle(color: Colors.white70)),
-            onTap: () async {
-              final confirmed = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Logout'),
-                  content: const Text('Are you sure you want to logout?'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
-                    TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Logout')),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Text(
+      title,
+      style: TextStyle(
+        color: Colors.white.withOpacity(0.3),
+        fontSize: 11,
+        fontWeight: FontWeight.w900,
+        letterSpacing: 1.5,
+      ),
+    );
+  }
+
+  Widget _buildMenuCard(List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF131932),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(children: children),
+    );
+  }
+
+  Widget _buildMenuRow({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(28),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E2442),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: const Color(0xFF6C63FF), size: 22),
+              ),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 17,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.4),
+                        fontSize: 13,
+                      ),
+                    ),
                   ],
                 ),
-              );
-              if (confirmed == true) await _logout();
-            },
+              ),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                color: Colors.white.withOpacity(0.1),
+                size: 16,
+              ),
+            ],
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuDivider() {
+    return Divider(
+      color: Colors.white.withOpacity(0.03),
+      height: 1,
+      indent: 72,
+      endIndent: 20,
+    );
+  }
+
+  Widget _buildLogoutButton() {
+    return Center(
+      child: TextButton.icon(
+        onPressed: () async {
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              backgroundColor: const Color(0xFF131932),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              title: const Text('Logout', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              content: const Text('Are you sure you want to logout?', style: TextStyle(color: Colors.white70)),
+              actions: [
+                TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel', style: TextStyle(color: Colors.white38))),
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(true), 
+                  child: const Text('Logout', style: TextStyle(color: Color(0xFFE91E63), fontWeight: FontWeight.bold))
+                ),
+              ],
+            ),
+          );
+          if (confirmed == true) await _logout();
+        },
+        icon: const Icon(Icons.logout_rounded, color: Color(0xFFE91E63), size: 18),
+        label: const Text(
+          'LOGOUT FROM ACCOUNT',
+          style: TextStyle(color: Color(0xFFE91E63), fontWeight: FontWeight.w900, letterSpacing: 1, fontSize: 12),
+        ),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          backgroundColor: const Color(0xFFE91E63).withOpacity(0.1),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
       ),
     );
   }
