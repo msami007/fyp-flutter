@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:google_speech/google_speech.dart';
-import 'package:google_speech/generated/google/cloud/speech/v1/cloud_speech.pb.dart' as pb hide SpeechClient;
+import 'package:google_speech/generated/google/cloud/speech/v1p1beta1/cloud_speech.pb.dart' as pb;
 import 'package:record/record.dart';
 import 'package:vosk_flutter_2/vosk_flutter_2.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -21,7 +21,7 @@ class TranscriptionService {
   TranscriptionService._internal();
 
   // ── Cloud engine (Google Cloud STT) ──
-  late SpeechToText _googleSpeech;
+  late SpeechToTextBeta _googleSpeech;
   final stt.SpeechToText _nativeSpeech = stt.SpeechToText();
   final AudioRecorder _audioRecorder = AudioRecorder();
   StreamSubscription<pb.StreamingRecognizeResponse>? _audioStreamSubscription;
@@ -74,7 +74,8 @@ class TranscriptionService {
     try {
       final jsonKey = ApiKeys.googleCloudServiceAccount.trim();
       if (jsonKey.isNotEmpty && !jsonKey.contains('PASTE YOUR')) {
-        _googleSpeech = SpeechToText.viaServiceAccount(ServiceAccount.fromString(jsonKey));
+        final serviceAccount = ServiceAccount.fromString(jsonKey);
+        _googleSpeech = SpeechToTextBeta.viaServiceAccount(serviceAccount);
         _speechReady = true;
         debugPrint('✅ Google Cloud STT ready');
       } else {
@@ -247,8 +248,8 @@ class TranscriptionService {
       final localeId = isAuto ? 'en-US' : (_cloudLocales[_currentLanguage] ?? 'en_US');
       final alternativeLocales = isAuto ? ['ur-PK'] : <String>[];
 
-      // 1. Configure STT
-      final config = RecognitionConfig(
+      // 1. Configure STT using Beta for alternativeLanguageCodes
+      final config = RecognitionConfigBeta(
         encoding: AudioEncoding.LINEAR16,
         model: RecognitionModel.basic,
         enableAutomaticPunctuation: true,
@@ -257,9 +258,10 @@ class TranscriptionService {
         alternativeLanguageCodes: alternativeLocales,
       );
 
-      final streamingConfig = StreamingRecognitionConfig(
+      final streamingConfig = StreamingRecognitionConfigBeta(
         config: config,
         interimResults: true,
+        singleUtterance: false,
       );
 
       // 2. Start Microphone Stream (OR use external)
