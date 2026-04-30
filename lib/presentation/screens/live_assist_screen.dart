@@ -9,6 +9,7 @@ import '../../data/services/audio_enhancement_service.dart';
 import '../../data/services/native_audio_api.dart';
 import '../../data/services/HearingProfileService.dart';
 import '../../data/services/transcription_service.dart';
+import '../../data/services/conversation_history_service.dart';
 
 class LiveAssistScreen extends StatefulWidget {
   const LiveAssistScreen({super.key});
@@ -45,6 +46,7 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
 
   // ── Live Caption State ──
   final TranscriptionService _transcription = TranscriptionService();
+  final ConversationHistoryService _historyService = ConversationHistoryService();
   bool _showCaptions = false;
   String _selectedLang = 'en'; // Default to English
   String _captionText = '';
@@ -68,8 +70,8 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
     _initialize();
   }
 
-  void _startCaptionPipeline() {
-    _transcription.startListening(
+  Future<void> _startCaptionPipeline() async {
+    await _transcription.startListening(
       onPartial: (text) {
         if (!mounted) return;
         setState(() => _partialText = text);
@@ -107,14 +109,14 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
     debugPrint('✅ Caption pipeline started (processed audio → Vosk)');
   }
 
-  void _stopCaptionPipeline() {
+  Future<void> _stopCaptionPipeline() async {
     _captionTimer?.cancel();
     _captionTimer = null;
-    _transcription.stopListening();
+    await _transcription.stopListening();
     debugPrint('⏹️ Caption pipeline stopped');
   }
 
-  void _toggleCaptions() {
+  Future<void> _toggleCaptions() async {
     setState(() {
       _showCaptions = !_showCaptions;
       if (_showCaptions) {
@@ -124,10 +126,10 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
     });
     
     if (_showCaptions && _isRunning) {
-      _startCaptionPipeline();
+      await _startCaptionPipeline();
       _showSnackBar('Live Captions ON', const Color(0xFF6C63FF));
     } else {
-      _stopCaptionPipeline();
+      await _stopCaptionPipeline();
       _isCaptionLoading = false;
       _showSnackBar('Live Captions OFF', Colors.grey);
     }
@@ -241,21 +243,142 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
     }
   }
 
-  void _stopAssist() {
+  Future<void> _stopAssist({bool silent = false}) async {
     try {
       NativeAudioApi.stopAudio();
       _levelTimer?.cancel();
       _pulseController.stop();
       // Stop captions when audio stops
-      _stopCaptionPipeline();
-      setState(() {
+      await _stopCaptionPipeline();
+      
+      final String fullTranscript = _captionText.isNotEmpty 
+          ? _captionText + (_partialText.isNotEmpty ? '\n$_partialText' : '')
+          : _partialText;
+
+      if (!silent && mounted) {
+        setState(() {
+          _isRunning = false;
+          _inputLevel = 0;
+          _outputLevel = 0;
+          _partialText = '';
+        });
+
+        if (_showCaptions && fullTranscript.trim().isNotEmpty) {
+          _promptToSaveTranscription(fullTranscript.trim());
+        }
+      } else {
         _isRunning = false;
-        _inputLevel = 0;
-        _outputLevel = 0;
-        _partialText = '';
-      });
+      }
     } catch (e) {
       debugPrint("Stop Error: $e");
+    }
+  }
+
+  Future<void> _promptToSaveTranscription(String transcript) async {
+    final bool? save = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E2139),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('Save Live Captions?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: const Text(
+          'Would you like to save the captions generated during this session, or discard them?',
+          style: TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Discard', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6C63FF),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            child: const Text('Save', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (save == true && mounted) {
+      final TextEditingController nameController = TextEditingController(
+        text: 'Assist Transcript ${DateTime.now().day}/${DateTime.now().month} ${DateTime.now().hour}:${DateTime.now().minute.toString().padLeft(2, '0')}'
+      );
+
+      final String? result = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1E2139),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: const Text('Save Transcription', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Give your transcript a name for easy search later.', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nameController,
+                autofocus: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.05),
+                  hintText: 'Enter name...',
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: Colors.white54))),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, nameController.text),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF6C63FF),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: const Text('Save Transcript', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+
+      if (result != null && result.trim().isNotEmpty && mounted) {
+        await _historyService.saveConversation(
+          title: result.trim(),
+          transcript: transcript,
+          language: _selectedLang,
+          durationSeconds: 0,
+          modelUsed: 'whisper',
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text("Saved to history ✓"),
+              backgroundColor: const Color(0xFF4CAF50),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          );
+        }
+        
+        setState(() {
+          _captionHistory.clear();
+          _captionText = '';
+        });
+      }
+    } else {
+      // Discarded or Cancelled
+      setState(() {
+        _captionHistory.clear();
+        _captionText = '';
+      });
     }
   }
 
@@ -273,8 +396,7 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
 
   @override
   void dispose() {
-    _stopAssist();
-    _stopCaptionPipeline();
+    _stopAssist(silent: true);
     _devicesSub?.cancel();
     _pulseController.dispose();
     _enhancement.dispose();
@@ -923,12 +1045,12 @@ class _LiveAssistScreenState extends State<LiveAssistScreen>
           dropdownColor: const Color(0xFF131932),
           icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: Colors.white24),
           style: const TextStyle(color: Color(0xFF6C63FF), fontSize: 11, fontWeight: FontWeight.bold),
-          onChanged: (String? newValue) {
+          onChanged: (String? newValue) async {
             if (newValue != null) {
               setState(() => _selectedLang = newValue);
-              if (_isRunning) {
-                _stopCaptionPipeline();
-                _startCaptionPipeline();
+              if (_isRunning && _showCaptions) {
+                await _stopCaptionPipeline();
+                await _startCaptionPipeline();
               }
             }
           },
